@@ -1,32 +1,327 @@
-# Supervisor Argus
+<div align="center">
 
-Escuta e qualifica ligações da discadora Argus (categorias/subcategorias) e alimenta um dashboard com filtros por data.
+<img src="frontend/public/icon.svg" width="76" alt="Logo do Crivo" />
 
-## Rodar
+# Crivo
 
-```powershell
-# Backend (http://127.0.0.1:8000, docs em /docs)
-cd backend
-python -m venv .venv; .venv\Scripts\pip install -r requirements.txt
-copy ..\.env.example ..\.env   # preencha ARGUS_TOKEN, ARGUS_CAMPAIGN_IDS, OPENAI_API_KEY
-.venv\Scripts\python -m uvicorn app.main:app --port 8000
+**Auditoria de ligações: o que o operador tabulou × o que a gravação realmente mostra.**
 
-# Frontend (http://localhost:3000)
-cd frontend; npm install; npm run dev
+Cruza os dados da discadora **Argus** com a análise de **IA** sobre cada gravação para dar uma visão clara<br/>
+do panorama das ligações, medir a qualidade da tabulação e monitorar a operação em tempo real.
+
+<p>
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" />
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.16x-009688?logo=fastapi&logoColor=white" />
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
+  <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-25%20passando-0ca30c" />
+</p>
+
+<a href="#-começando">Começando</a> ·
+<a href="#-como-funciona">Como funciona</a> ·
+<a href="#%EF%B8%8F-configuração">Configuração</a> ·
+<a href="#-api">API</a> ·
+<a href="#%EF%B8%8F-roadmap">Roadmap</a>
+
+<br/><br/>
+
+<img src="docs/img/visao-geral.png" alt="Visão geral do Crivo" width="100%" />
+
+<sub>Telas com <b>dados fictícios</b> gerados por <code>scripts/seed_demo.py</code>.</sub>
+
+</div>
+
+---
+
+## ✨ O que o Crivo entrega
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🎯 Matriz de contraste
+Para cada tabulação feita no Argus, mostra como a IA classificou a gravação. Células com **contorno vermelho** são divergências: o operador marcou uma coisa e a ligação foi outra.
+
+</td>
+<td width="50%" valign="top">
+
+### 👥 Ranking de operadores
+Taxa de divergência **sobre ligações qualificadas**, com faixas baixa/média/alta. Um clique filtra o painel inteiro pelo operador.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🎧 Escuta rápida
+Player fixo com fila, velocidade de 1× a 2× e atalhos (`espaço`, `←` `→`, `Shift+←/→`). Na lista, `j`/`k` navega e `Enter` abre o detalhe com transcrição em formato de conversa.
+
+</td>
+<td valign="top">
+
+### 🩺 Saúde do sistema
+Último webhook, polling, downloads e IA, com **alertas acionáveis** (webhook silencioso, token inválido, fila acumulada, erros). Upload do relatório da discadora com arrastar e soltar.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔗 Links compartilháveis
+Todos os filtros e a ligação aberta ficam na URL. Mande `…/ligacoes?operador=Ana&divergencia=true&ligacao=123` para alguém e a pessoa vê exatamente a mesma coisa.
+
+</td>
+<td valign="top">
+
+### 📱 Responsivo e com tema
+Funciona do celular ao monitor ultrawide. Tema claro, escuro ou do sistema. Paleta de categorias **validada para daltonismo**, e toda cor vem acompanhada de rótulo ou ícone.
+
+</td>
+</tr>
+</table>
+
+<div align="center">
+<img src="docs/img/matriz-operadores.png" alt="Matriz de contraste e ranking de operadores" width="100%" />
+<br/><br/>
+<img src="docs/img/ligacao-detalhe.png" alt="Detalhe de uma ligação divergente" width="49%" />
+<img src="docs/img/visao-geral-escuro.png" alt="Tema escuro" width="49%" />
+<br/>
+<img src="docs/img/saude.png" alt="Saúde do sistema" width="74%" />
+<img src="docs/img/celular.png" alt="Versão para celular" width="23%" />
+</div>
+
+---
+
+## 🧭 Como funciona
+
+```mermaid
+flowchart LR
+    subgraph Argus["☎️ Discadora Argus"]
+        WH[Webhook de tabulação]
+        REP["/report/ligacoesdetalhadas"]
+        REC[(Gravações)]
+        CSV[Relatório detalhado CSV]
+    end
+
+    subgraph Backend["⚙️ Backend · FastAPI"]
+        IN[Ingestão<br/>webhook · polling · backfill · pasta local]
+        Q[[Fila de processamento]]
+        IA[IA<br/>Whisper → GPT]
+        DIV[Divergência<br/>tabulação × IA]
+        ID[Identidade<br/>é o cliente?]
+        DB[(SQLite / PostgreSQL)]
+        ST[Saúde<br/>eventos + alertas]
+    end
+
+    UI["🖥️ Frontend · Next.js"]
+
+    WH --> IN
+    REP --> IN
+    CSV -->|upload ou pasta| DIV
+    IN --> Q --> IA --> DIV --> ID --> DB
+    REC -->|download| IA
+    IN -.registra.-> ST
+    IA -.registra.-> ST
+    DB --> UI
+    ST --> UI
 ```
 
-No dashboard: **Importar acervo local** (pasta `Gravações` + CSV de escuta) → **Qualificar pendentes**.
+1. **Ingestão.** A ligação chega pelo webhook de tabulação do Argus (tempo real). O polling a cada 5 min cobre webhooks perdidos, o backfill recupera períodos e a importação local lê o acervo de gravações.
+2. **Qualificação.** O áudio é baixado, transcrito pelo Whisper e classificado pelo GPT na [taxonomia oficial](#-taxonomia).
+   - Se a IA falhar, a ligação fica com **erro** e volta para a fila; o sistema nunca inventa uma categoria.
+   - A transcrição já obtida é preservada.
+3. **Cruzamento.** O relatório detalhado da discadora traz operador, tronco, sinalização SIP e tabulação. O Crivo compara a tabulação do operador com a classificação da IA e marca as divergências.
+4. **Identidade.** Se alguém nega ser o titular mas o mesmo telefone e nome já se confirmaram antes, a ligação vira *"É o cliente (identificou-se em outras ligações)"*.
+5. **Monitoramento.** Cada etapa registra sucesso ou falha. O painel de saúde transforma isso em alertas.
 
-## Fluxos
+---
 
-| Fluxo | Como |
+## 🚀 Começando
+
+### Pré-requisitos
+- **Python 3.11+**
+- **Node.js 20+**
+- Opcional: chave da **OpenAI** e token da **API Argus**. Sem eles o painel funciona com dados importados ou de demonstração.
+
+### 1. Backend
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp ../.env.example ../.env         # Windows: copy ..\.env.example ..\.env
+uvicorn app.main:app --reload --port 8000
+```
+
+A documentação interativa da API fica em **http://127.0.0.1:8000/docs**.
+
+### 2. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Abra **http://localhost:3000**. O Next repassa `/api/*` para o backend (variável `BACKEND_URL`, padrão `http://127.0.0.1:8000`), então não é preciso configurar CORS em desenvolvimento.
+
+### 3. Dados de demonstração (opcional)
+
+Para ver o painel funcionando sem dados reais (nenhum dado pessoal):
+
+```bash
+cd backend
+python -m scripts.seed_demo            # cria ~600 ligações fictícias dos últimos 14 dias
+python -m scripts.seed_demo --limpar   # remove só as ligações de demonstração
+```
+
+---
+
+## ⚙️ Configuração
+
+Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.example`](.env.example)). Caminhos relativos valem a partir da raiz.
+
+| Variável | Para quê | Padrão |
+|---|---|---|
+| `ARGUS_TOKEN` | Header `Token-Signature` da API Argus | — |
+| `ARGUS_CAMPAIGN_IDS` | Campanhas do polling/backfill (`12,15`) | — |
+| `ARGUS_POLL_MINUTOS` | Intervalo do polling de segurança | `5` |
+| `ARGUS_AUDIO_CHANNELS` | `1` mono · `2` estéreo · `3` pontas A/B separadas | `1` |
+| `ARGUS_WEBHOOK_SECRET` | Segredo do webhook (`X-Webhook-Secret` ou `?secret=`) | — |
+| `OPENAI_API_KEY` | Liga a transcrição e a classificação por IA | — |
+| `OPENAI_MODEL` / `OPENAI_WHISPER_MODEL` | Modelos usados | `gpt-4o-mini` / `whisper-1` |
+| `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
+| `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
+| `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
+| `LEGACY_CSV` / `LEGACY_HTML` | Escuta manual anterior | `./data/…` |
+| `CORS_ORIGINS` | Origens liberadas no CORS | `http://localhost:3000,…` |
+| `ALERTA_WEBHOOK_MINUTOS` | Silêncio de webhook que gera alerta | `30` |
+| `HORARIO_COMERCIAL` | Janela dos alertas de webhook (seg–sáb) | `8-20` |
+
+> [!IMPORTANT]
+> **LGPD.** Gravações, transcrições e relatórios contêm dados pessoais.
+> - A pasta `data/` e o `.env` estão no `.gitignore`: nunca versione esses arquivos.
+> - Nas listas, o telefone aparece mascarado.
+> - Antes de expor o painel fora da rede interna, coloque autenticação na frente da API (veja o roadmap).
+
+### Fontes de dados
+
+| Fluxo | Como ativar |
 |---|---|
-| Tempo real | Configure no Argus o webhook **Tabulação** (idTipoWebhook=2) para `POST /api/v1/webhooks/argus` (opcional `?secret=`). Baixa o áudio (`/cmd/downloadgravacao`) e qualifica. |
-| Fallback | A cada 5 min consulta `/report/ligacoesdetalhadas` (últimos 15 min) das campanhas em `ARGUS_CAMPAIGN_IDS`. |
-| Backfill | `POST /api/v1/sync/argus?data_inicio=2026-11-05&data_fim=2026-11-05` (janelas de 7 dias). |
-| Acervo local | `POST /api/v1/sync/local` — parse do nome `YYYY-MM-DD_HHMMSS_nr{nr}_id{idLigacao}_{tel}_{nome}.mp3`. |
+| **Tempo real** | No Argus, configure o webhook **Tabulação** (`idTipoWebhook=2`) para `POST /api/v1/webhooks/argus`. A gravação é baixada e qualificada automaticamente. |
+| **Polling de segurança** | Defina `ARGUS_TOKEN` e `ARGUS_CAMPAIGN_IDS`. A cada `ARGUS_POLL_MINUTOS`, busca as ligações recentes. |
+| **Recuperar período** | Tela *Saúde do sistema* → *Recuperar período*, ou `POST /api/v1/sync/argus?data_inicio=…&data_fim=…` (janelas de 7 dias). |
+| **Acervo local** | Grave em `RECORDINGS_DIR` arquivos no padrão `YYYY-MM-DD_HHMMSS_nr{lead}_id{idLigacao}_{telefone}_{nome}.mp3` e clique em *Importar acervo local*. |
+| **Relatório da discadora** | Arraste o CSV em *Saúde do sistema* → *Cruzar relatório da discadora*. O arquivo é lido **pelo nome das colunas**, em UTF-8 ou Windows-1252. |
 
-API: `GET /api/v1/calls` (filtros `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `telefone`, `operador`, `campanha`, `q`, `status`), `/analytics/summary|timeline|operators`.
+---
 
-## Testes
-`cd backend; .venv\Scripts\python -m pytest`
+## 🔌 API
+
+<details>
+<summary><b>Ver endpoints</b></summary>
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/v1/calls` | Lista paginada (filtros abaixo + `page`, `page_size`) |
+| `GET` | `/api/v1/calls/{id}` | Detalhe com transcrição diarizada |
+| `GET` | `/api/v1/calls/{id}/audio` | Áudio da gravação |
+| `GET` | `/api/v1/calls/export` | CSV pronto para Excel (`;` + BOM) |
+| `GET` | `/api/v1/analytics/summary` | KPIs, categorias, matriz de contraste, ranking, distribuições |
+| `GET` | `/api/v1/analytics/timeline` | Volume diário por categoria |
+| `GET` | `/api/v1/analytics/horas` | Hora do dia × categoria |
+| `GET` | `/api/v1/analyst/filters-options` | Opções reais de filtro (vindas do banco) |
+| `GET` | `/api/v1/taxonomy` | Taxonomia oficial |
+| `GET` | `/api/v1/saude` | Integrações, fila, erros recentes e alertas |
+| `POST` | `/api/v1/webhooks/argus` | Recebe webhooks do Argus |
+| `POST` | `/api/v1/sync/local` | Importa o acervo local e cruza com a discadora |
+| `POST` | `/api/v1/sync/cruzar` | Cruza o relatório da discadora (upload `multipart` ou `CRUZAR_CSV`) |
+| `POST` | `/api/v1/sync/argus` | Polling/backfill manual |
+| `POST` | `/api/v1/sync/process` | Envia pendentes e com erro para a fila |
+| `POST` | `/api/v1/sync/reprocess/{id}` | Reanalisa uma ligação |
+
+**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `status`, `q`.
+
+</details>
+
+---
+
+## 🏷️ Taxonomia
+
+| Categoria | Subcategorias |
+|---|---|
+| 🔵 **Em negociação** | Proposta em andamento · Aceite verbal · Agendamento de retorno · Migração para WhatsApp |
+| 🟠 **Não é o cliente** | É o cliente (histórico) · Engano direto · Terceiro/família · Chip novo · Titular falecido · Reclamação recorrente |
+| 🟢 **Sem interesse** | Cliente revoltado · Cliente calmo · Já possui / sem margem |
+| 🟡 **Ligação muda** | Atendente solitário · Cliente solitário · Falha de comunicação · Mudo total |
+| 🩷 **Caixa postal** | URA da operadora · Pós-bip · Fax/modem · Número inexistente |
+| ⚪ **Indeterminado** | Sem dados suficientes |
+
+Fonte única: [`backend/app/taxonomy.py`](backend/app/taxonomy.py).
+
+---
+
+## 🗂️ Estrutura
+
+```
+crivo/
+├── backend/
+│   ├── app/
+│   │   ├── api/            # rotas: calls, saude, sync, webhooks
+│   │   ├── services/       # argus_client, ai_qualifier, pipeline, local_ingestor, sincronizador, status
+│   │   ├── models.py       # Call, ContactIdentity, SystemStatus
+│   │   ├── taxonomy.py     # categorias oficiais
+│   │   └── worker.py       # fila em thread (trocar por RQ/Celery ao escalar)
+│   ├── scripts/seed_demo.py
+│   └── tests/
+├── frontend/
+│   └── src/
+│       ├── app/            # páginas: visão geral, ligações, saúde
+│       ├── components/     # gráficos, player, filtros, shell, ui
+│       └── lib/            # cliente da API e utilitários
+└── docs/img/               # capturas do README
+```
+
+## 🧪 Testes
+
+```bash
+cd backend && python -m pytest
+```
+
+```bash
+cd frontend && npm run typecheck && npm run build
+```
+
+---
+
+## 🛣️ Roadmap
+
+- [x] **Semana 1: dados confiáveis.**
+  - Falha da IA não vira mais "ligação muda".
+  - O cruzamento com a discadora está ligado e lê pelo cabeçalho.
+  - A importação não quebra com ligações que já vieram do Argus.
+  - O polling registra as falhas, e foi criado o painel de saúde.
+  - As métricas usam os mesmos filtros e as bases certas.
+  - Novo frontend.
+- [ ] **Semana 2: modelo de tabulação.**
+  - Tabela de equivalência por ID de tabulação do Argus, editável na tela.
+  - Taxonomia v2: desligou na abertura, pediu para não ligar (LGPD), ligação caiu, já é cliente.
+  - Divergência por gravidade.
+- [ ] **Semana 3: medir a IA.**
+  - Revisão humana pela tela.
+  - Acurácia e matriz de confusão por categoria, usando o CSV de escuta como gabarito.
+  - Fila de baixa confiança.
+- [ ] **Semana 4: escuta precisa e alertas.**
+  - Áudio estéreo com as pontas A/B separadas, para diarização real.
+  - Filtro de alucinações do Whisper no silêncio.
+  - Alertas e relatório diário automáticos.
+- [ ] **Segurança e operação.**
+  - Login.
+  - Alembic + PostgreSQL.
+  - Docker e CI.
+  - Política de retenção de áudio.
+
+<div align="center"><sub>Feito para enxergar o que cada ligação realmente foi.</sub></div>
