@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+node_modules/
+.next/
+.env
+*.db
+data/
+backend/doc-api-argus.*
+backend/csv_probe.txt
