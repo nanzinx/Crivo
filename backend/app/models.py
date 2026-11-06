@@ -1,5 +1,10 @@
 from datetime import datetime
 
+
+def agora() -> datetime:
+    """Horário local do servidor (mesma referência das datas do Argus). Configure TZ=America/Sao_Paulo."""
+    return datetime.now()
+
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,7 +39,7 @@ class Call(Base):
     categoria: Mapped[str | None] = mapped_column(String(40), index=True)
     subcategoria: Mapped[str | None] = mapped_column(String(60), index=True)
     confianca: Mapped[float | None] = mapped_column(Float)
-    motor: Mapped[str | None] = mapped_column(String(30))  # gemini | heuristica | csv
+    motor: Mapped[str | None] = mapped_column(String(30))  # openai | heuristica | csv | html
     resumo: Mapped[str | None] = mapped_column(Text)
     evidencia: Mapped[str | None] = mapped_column(Text)
     transcricao: Mapped[str | None] = mapped_column(Text)
@@ -55,7 +60,7 @@ class Call(Base):
     ligacao_referencia_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"))
     erro: Mapped[str | None] = mapped_column(Text)
 
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     qualificado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (Index("ix_calls_data_cat", "data_ligacao", "categoria"),)
@@ -73,3 +78,16 @@ class ContactIdentity(Base):
     confirmado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (Index("ux_contact", "telefone", "nome_normalizado", "id_call_evidencia", unique=True),)
+
+
+class SystemStatus(Base):
+    """Último resultado de cada integração (webhook, polling, IA, download) para o painel de saúde."""
+
+    __tablename__ = "system_status"
+
+    chave: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    detalhe: Mapped[str | None] = mapped_column(Text)
+    ultimo_sucesso_em: Mapped[datetime | None] = mapped_column(DateTime)
+    ultima_falha_em: Mapped[datetime | None] = mapped_column(DateTime)

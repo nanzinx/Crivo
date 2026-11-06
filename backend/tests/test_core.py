@@ -1,25 +1,11 @@
-import os
-import tempfile
+# O banco temporário e a ausência de OPENAI_API_KEY são configurados em conftest.py
+from datetime import datetime
 
-os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp()}/t.db"
-os.environ["OPENAI_API_KEY"] = ""
+import pytest
 
-from datetime import datetime  # noqa: E402
-
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app.database import SessionLocal, init_db  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models import Call  # noqa: E402
-from app.services import ai_qualifier, local_ingestor, pipeline  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def client():
-    init_db()
-    with TestClient(app) as c:
-        yield c
+from app.database import SessionLocal, init_db
+from app.models import Call
+from app.services import ai_qualifier, local_ingestor, pipeline
 
 
 def test_parse_filename():

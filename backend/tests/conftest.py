@@ -5,6 +5,8 @@ temp_dir = tempfile.mkdtemp()
 db_path = os.path.join(temp_dir, "test.db").replace("\\", "/")
 os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["ARGUS_TOKEN"] = ""
+os.environ["RECORDINGS_DIR"] = os.path.join(temp_dir, "gravacoes")
 
 import pytest
 from fastapi.testclient import TestClient

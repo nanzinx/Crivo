@@ -8,6 +8,7 @@ from .. import worker
 from ..config import settings
 from ..database import get_db
 from ..models import Call
+from ..services import status
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
@@ -56,6 +57,7 @@ async def argus_webhook(request: Request, db: Session = Depends(get_db),
     if settings.argus_webhook_secret and (x_webhook_secret or secret) != settings.argus_webhook_secret:
         raise HTTPException(403, "Segredo inválido")
     p = await request.json()
+    status.registrar(status.WEBHOOK, True, f"idTipoWebhook={p.get('idTipoWebhook')} idLigacao={p.get('idLigacao')}")
     tipo = int(p.get("idTipoWebhook", 0) or 0)
     if tipo not in (1, 2):
         return {"ok": True, "ignorado": f"idTipoWebhook={tipo}"}

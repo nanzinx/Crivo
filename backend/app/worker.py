@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from .database import SessionLocal
 from .models import Call
-from .services import argus_client, pipeline
+from .services import argus_client, pipeline, status
 
 log = logging.getLogger("worker")
 _q: "queue.Queue[tuple[int, bool]]" = queue.Queue()
@@ -49,9 +49,11 @@ def _run():
                     try:
                         call.caminho_audio = str(argus_client.download_gravacao(call.id_campanha, call.id_ligacao))
                         db.commit()
+                        status.registrar(status.DOWNLOAD, True, f"Ligação #{call.id}")
                     except Exception as e:
                         call.status, call.erro = "error", f"download: {str(e)[:300]}"
                         db.commit()
+                        status.registrar(status.DOWNLOAD, False, f"Ligação #{call.id}: {e}")
                         continue
                 pipeline.qualificar_call(db, call, force=force)
         except Exception:

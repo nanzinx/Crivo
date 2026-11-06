@@ -1,32 +1,32 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from .api import calls, sync, webhooks
+from .api import calls, saude, sync, webhooks
 from .config import settings
 from .database import init_db
-from .services import argus_client
+from .services import argus_client, sincronizador
+
+log = logging.getLogger("crivo")
 
 
 async def _poll_argus():
-    """Fallback: a cada 5 min busca ligações dos últimos 15 min (cobre falhas de webhook)."""
-    from .database import SessionLocal
+    """Fallback: periodicamente busca as ligações recentes (cobre falhas de webhook).
 
+    Roda em thread para não bloquear a API (o cliente Argus é síncrono, timeout de 120 s).
+    Sucesso e falha ficam registrados em /api/v1/saude.
+    """
+    intervalo = max(1, settings.argus_poll_minutos) * 60
     while True:
-        await asyncio.sleep(300)
+        await asyncio.sleep(intervalo)
         try:
-            for camp in argus_client.campaign_ids():
-                with SessionLocal() as db:
-                    for item in argus_client.ligacoes_detalhadas(camp, ultimos_minutos=15):
-                        item.setdefault("idCampanha", camp)
-                        c = webhooks.upsert_from_argus(db, item)
-                        if c:
-                            worker.enqueue(c.id)
-        except Exception:
-            pass
+            await asyncio.to_thread(sincronizador.sincronizar_recentes, settings.argus_poll_minutos * 3)
+        except Exception:  # pragma: no cover - sincronizar já registra a falha
+            log.exception("polling Argus")
 
 
 @asynccontextmanager
@@ -39,11 +39,12 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="Supervisor Argus", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Crivo", description="Auditoria de ligações: Argus × IA", version="0.2.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_list, allow_methods=["*"], allow_headers=["*"])
 app.include_router(calls.router)
 app.include_router(webhooks.router)
 app.include_router(sync.router)
+app.include_router(saude.router)
 
 
 @app.get("/health")

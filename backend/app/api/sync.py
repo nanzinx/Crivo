@@ -1,54 +1,55 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from .. import worker
 from ..database import get_db
-from ..services import argus_client, local_ingestor, pipeline
-from .webhooks import upsert_from_argus
+from ..services import local_ingestor, pipeline, sincronizador, status
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
 
 
 @router.post("/local")
 def sync_local(limit: int | None = None, db: Session = Depends(get_db)):
-    """Importa a pasta Gravações + CSV legado + HTML enriquecido."""
-    folder = local_ingestor.import_folder(db, limit=limit)
-    csv_ = local_ingestor.import_legacy_csv(db)
-    html_ = local_ingestor.import_legacy_html(db)
-    return {"pasta": folder, "csv": csv_, "html": html_, "identidades_revalidadas": pipeline.revalidar_identidades(db)}
+    """Importa a pasta de gravações + CSV de escuta + HTML legado e CRUZA com o relatório da discadora."""
+    try:
+        folder = local_ingestor.import_folder(db, limit=limit)
+        csv_ = local_ingestor.import_legacy_csv(db)
+        html_ = local_ingestor.import_legacy_html(db)
+        cruz = local_ingestor.import_cruzar_dados(db)
+        ident = pipeline.revalidar_identidades(db)
+    except Exception as e:
+        db.rollback()
+        status.registrar(status.IMPORTACAO, False, f"{type(e).__name__}: {e}")
+        raise HTTPException(500, f"Falha na importação: {e}")
+    status.registrar(status.IMPORTACAO, True,
+                     f"{folder.get('novas', 0)} novas, {folder.get('vinculadas', 0)} vinculadas")
+    status.registrar(status.CRUZAMENTO, "erro" not in cruz,
+                     cruz.get("erro") or f"{cruz['linhas_enriquecidas']} linhas cruzadas")
+    return {"pasta": folder, "csv": csv_, "html": html_, "cruzamento": cruz, "identidades_revalidadas": ident}
+
+
+@router.post("/cruzar")
+async def sync_cruzar(arquivo: UploadFile | None = File(None), db: Session = Depends(get_db)):
+    """Cruza o relatório detalhado da discadora. Envie o CSV (upload) ou use o caminho CRUZAR_CSV do .env."""
+    conteudo = await arquivo.read() if arquivo else None
+    res = local_ingestor.import_cruzar_dados(db, conteudo=conteudo)
+    status.registrar(status.CRUZAMENTO, "erro" not in res,
+                     res.get("erro") or f"{res['linhas_enriquecidas']} linhas cruzadas")
+    if "erro" in res and arquivo:
+        raise HTTPException(400, res["erro"])
+    return res
 
 
 @router.post("/argus")
-def sync_argus(data_inicio: date | None = None, data_fim: date | None = None, ultimos_minutos: int | None = None,
-               db: Session = Depends(get_db)):
-    """Polling/backfill via /report/ligacoesdetalhadas (intervalo máx. 7 dias por consulta)."""
-    ids = argus_client.campaign_ids()
-    if not ids:
-        raise HTTPException(400, "Defina ARGUS_CAMPAIGN_IDS")
-    novos = enfileirados = 0
-    try:
-        for camp in ids:
-            if ultimos_minutos:
-                windows = [(None, None)]
-            else:
-                ini = datetime.combine(data_inicio or date.today(), time.min)
-                fim = datetime.combine(data_fim or date.today(), time.max)
-                windows, cur = [], ini
-                while cur < fim:
-                    windows.append((cur, min(cur + timedelta(days=7) - timedelta(seconds=1), fim)))
-                    cur += timedelta(days=7)
-            for a, b in windows:
-                for item in argus_client.ligacoes_detalhadas(camp, a, b, ultimos_minutos):
-                    item.setdefault("idCampanha", camp)
-                    call = upsert_from_argus(db, item)
-                    if call:
-                        novos += 1
-                        enfileirados += worker.enqueue(call.id)
-    except Exception as e:
-        raise HTTPException(502, f"Falha Argus: {e}")
-    return {"ligacoes": novos, "enfileiradas": enfileirados}
+def sync_argus(data_inicio: date | None = None, data_fim: date | None = None, ultimos_minutos: int | None = None):
+    """Polling/backfill via /report/ligacoesdetalhadas (janelas de até 7 dias por consulta)."""
+    res = sincronizador.sincronizar(ultimos_minutos, data_inicio, data_fim)
+    if not res["ok"]:
+        code = 400 if "ARGUS_CAMPAIGN_IDS" in res.get("erro", "") else 502
+        raise HTTPException(code, f"Falha Argus: {res['erro']}")
+    return res
 
 
 @router.post("/process")
@@ -62,5 +63,5 @@ def reprocess(call_id: int):
 
 
 @router.get("/status")
-def status():
+def fila_status():
     return {"fila": worker.queue_size()}

@@ -1,5 +1,9 @@
-"""Qualificação: OpenAI (ChatGPT + Whisper) ou heurística sobre transcrição."""
-import json
+"""Qualificação: OpenAI (Whisper + ChatGPT) ou heurística sobre transcrição já existente.
+
+Regra importante: se a IA estiver configurada e falhar, a ligação NÃO é classificada por
+heurística. Ela vira erro (e volta para a fila), preservando a transcrição que já tiver sido
+obtida. Antes, uma falha virava "Ligação Muda / Mudo total" e contaminava os números.
+"""
 import re
 import unicodedata
 from pathlib import Path
@@ -9,6 +13,14 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..taxonomy import CATEGORIES, valid
+
+
+class QualificacaoError(RuntimeError):
+    """Falha da IA. `transcricao` guarda o que já foi transcrito (para não pagar o Whisper de novo)."""
+
+    def __init__(self, msg: str, transcricao: str | None = None):
+        super().__init__(msg)
+        self.transcricao = transcricao
 
 
 class Turno(BaseModel):
@@ -135,26 +147,19 @@ def _tax_text() -> str:
     return "\n".join(f"- {c}: {', '.join(v['subs'])}" for c, v in CATEGORIES.items() if c != "INDETERMINADO")
 
 
+def _cliente_openai():
+    from openai import OpenAI
+
+    return OpenAI(api_key=settings.openai_api_key)
+
+
 def transcrever_audio(client, audio_path: str) -> str:
     with open(audio_path, "rb") as f:
-        tr = client.audio.transcriptions.create(
-            model=settings.openai_whisper_model,
-            file=f,
-            language="pt",
-        )
+        tr = client.audio.transcriptions.create(model=settings.openai_whisper_model, file=f, language="pt")
     return getattr(tr, "text", "") or ""
 
 
-def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None, dur: float | None, transcricao: str | None = None) -> Resultado:
-    from openai import OpenAI
-
-    client = OpenAI(api_key=settings.openai_api_key)
-    texto = transcricao
-    if not texto and audio_path and Path(audio_path).exists():
-        texto = transcrever_audio(client, audio_path)
-
-    texto = texto or ""
-    system_prompt = _SYSTEM_PROMPT.format(tax=_tax_text())
+def _classificar_texto(client, texto: str, nome, tel, dur) -> Resultado | None:
     user_prompt = (
         f"Metadados da ligação:\n"
         f"- Nome esperado do titular: {nome or '(não informado)'}\n"
@@ -162,18 +167,35 @@ def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None
         f"- Duração: {dur or '?'} segundos\n\n"
         f"Transcrição da chamada:\n\"\"\"\n{texto}\n\"\"\""
     )
-
     resp = client.beta.chat.completions.parse(
         model=settings.openai_model,
         messages=[
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": _SYSTEM_PROMPT.format(tax=_tax_text())},
             {"role": "user", "content": user_prompt},
         ],
         response_format=Resultado,
     )
-    res = resp.choices[0].message.parsed
+    return resp.choices[0].message.parsed
+
+
+def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None, dur: float | None,
+                       transcricao: str | None = None) -> Resultado:
+    client = _cliente_openai()
+    texto = transcricao
+    if not texto and audio_path and Path(audio_path).exists():
+        try:
+            texto = transcrever_audio(client, audio_path)
+        except Exception as e:
+            raise QualificacaoError(f"transcrição: {str(e)[:300]}") from e
+    texto = texto or ""
+
+    try:
+        res = _classificar_texto(client, texto, nome, tel, dur)
+    except Exception as e:
+        raise QualificacaoError(f"classificação: {str(e)[:300]}", transcricao=texto or None) from e
     if not res:
-        return heuristica(texto, dur)
+        raise QualificacaoError("classificação: resposta vazia/recusada pelo modelo", transcricao=texto or None)
+
     res.motor = "openai"
     if not res.transcricao:
         res.transcricao = texto
@@ -183,11 +205,7 @@ def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None
 
 
 def qualificar(audio_path: str | None, nome, tel, dur, transcricao: str | None = None) -> Resultado:
+    """Com OPENAI_API_KEY: usa a IA (falhas levantam QualificacaoError). Sem chave: heurística."""
     if settings.openai_api_key:
-        try:
-            return classificar_openai(audio_path, nome, tel, dur, transcricao)
-        except Exception as e:  # cai para heurística
-            res = heuristica(transcricao, dur)
-            res.resumo += f" (OpenAI falhou: {str(e)[:120]})"
-            return res
+        return classificar_openai(audio_path, nome, tel, dur, transcricao)
     return heuristica(transcricao, dur)
