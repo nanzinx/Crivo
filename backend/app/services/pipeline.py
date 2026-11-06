@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Call, ContactIdentity, agora
+from ..taxonomy import label_cat
 from . import ai_qualifier, audio_analyzer, status
 
 
@@ -52,16 +53,17 @@ def calcular_divergencia(call: Call) -> None:
     if not call.categoria:
         return
     div, det = False, None
+    ia = label_cat(call.categoria)
     if tab == "NAO_TABULADO" and call.categoria in ("EM_NEGOCIACAO", "SEM_INTERESSE", "NAO_E_O_CLIENTE"):
         div = True
-        det = f"Operador não tabulou ({call.tabulacao_operador}), mas IA identificou {call.categoria}."
+        det = f"Operador não tabulou ({call.tabulacao_operador}), mas a IA identificou '{ia}'."
     elif tab == "MUDA_OU_CAIXA":
         div = call.categoria not in ("LIGACAO_MUDA", "CAIXA_POSTAL")
         if div:
-            det = f"Operador tabulou '{call.tabulacao_operador}', mas IA identificou '{call.categoria}'."
+            det = f"Operador tabulou '{call.tabulacao_operador}', mas a IA identificou '{ia}'."
     elif tab not in ("NAO_TABULADO", "OUTRO") and tab != call.categoria:
         div = True
-        det = f"Operador tabulou '{call.tabulacao_operador}', mas IA identificou '{call.categoria}'."
+        det = f"Operador tabulou '{call.tabulacao_operador}', mas a IA identificou '{ia}'."
     call.divergencia_tabulacao, call.divergencia_detalhe = div, det
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Call
+from ..services.pipeline import normalizar_tabulacao
 from ..taxonomy import CATEGORIES, label_cat, label_sub
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
@@ -315,7 +316,8 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
     )).all()
     matriz: dict[str, dict] = {}
     for tab_op, cat_ia, n in matriz_rows:
-        e = matriz.setdefault(tab_op, {"tabulacao_operador": tab_op, "total": 0, "categorias": {}})
+        e = matriz.setdefault(tab_op, {"tabulacao_operador": tab_op, "esperada": normalizar_tabulacao(tab_op),
+                                       "total": 0, "categorias": {}})
         e["total"] += n
         e["categorias"][cat_ia or "PENDENTE"] = n
 
