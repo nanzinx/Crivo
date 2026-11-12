@@ -33,6 +33,13 @@ def enqueue_pending(limit: int | None = None, include_awaiting: bool = True) -> 
         return sum(enqueue(i) for i in db.scalars(stmt))
 
 
+def enqueue_aguardando() -> int:
+    """Reenfileira só as ligações que esperam a IA (ex.: seguradas pelo teto diário)."""
+    with SessionLocal() as db:
+        ids = db.scalars(select(Call.id).where(Call.status == "awaiting_ai").order_by(Call.data_ligacao)).all()
+    return sum(enqueue(i) for i in ids)
+
+
 def queue_size() -> int:
     return _q.qsize()
 

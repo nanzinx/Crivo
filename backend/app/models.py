@@ -60,6 +60,12 @@ class Call(Base):
     ligacao_referencia_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"))
     erro: Mapped[str | None] = mapped_column(Text)
 
+    # Revisão humana: a IA não teve segurança, ou o áudio contradiz a tabulação
+    precisa_revisao: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)
+    revisao_motivo: Mapped[str | None] = mapped_column(String(255))
+    fala_segundos: Mapped[float | None] = mapped_column(Float)  # fala detectada localmente (VAD)
+    custo_usd: Mapped[float | None] = mapped_column(Float, default=0)  # gasto acumulado de IA nesta ligação
+
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     qualificado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -91,3 +97,19 @@ class SystemStatus(Base):
     detalhe: Mapped[str | None] = mapped_column(Text)
     ultimo_sucesso_em: Mapped[datetime | None] = mapped_column(DateTime)
     ultima_falha_em: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class IaUso(Base):
+    """Cada chamada paga de IA (transcrição ou classificação). Base do painel de custo."""
+
+    __tablename__ = "ia_uso"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"), index=True)
+    em: Mapped[datetime] = mapped_column(DateTime, default=agora, index=True)
+    tipo: Mapped[str] = mapped_column(String(20))  # transcricao | classificacao
+    modelo: Mapped[str] = mapped_column(String(64))
+    audio_segundos: Mapped[float] = mapped_column(Float, default=0)
+    tokens_entrada: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_saida: Mapped[int] = mapped_column(Integer, default=0)
+    custo_usd: Mapped[float] = mapped_column(Float, default=0)

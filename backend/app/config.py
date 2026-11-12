@@ -21,7 +21,25 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    openai_whisper_model: str = "whisper-1"
+    # Transcrição: gpt-4o-mini-transcribe custa cerca de metade do whisper-1 (valide com scripts/comparar_transcricao)
+    openai_whisper_model: str = "gpt-4o-mini-transcribe"
+
+    # ----- Custo de IA -----
+    ia_diarizar: bool = False  # True = a IA reescreve a conversa separada por falante (resposta ~5x maior)
+    ia_teto_diario_usd: float = 0  # 0 = sem teto; ao atingir, as ligações ficam "aguardando IA" até o dia seguinte
+    # Preços (US$). 0 = usar a tabela de app/services/custos.py para o modelo configurado
+    preco_transcricao_minuto: float = 0
+    preco_entrada_1m: float = 0
+    preco_saida_1m: float = 0
+
+    # ----- Detecção local de fala (sem IA) -----
+    vad_ativo: bool = True
+    vad_fala_minima_segundos: float = 0.6  # menos fala que isso = "Mudo total" sem chamar a IA
+    suspeita_fala_canal_segundos: float = 3  # estéreo: fala em CADA lado para suspeitar de conversa
+    suspeita_fala_mono_segundos: float = 20  # mono: fala total para suspeitar de conversa
+
+    # Divergência só é apontada com confiança da IA a partir daqui; abaixo, vai para revisão humana
+    confianca_minima_divergencia: float = 0.6
 
     database_url: str = f"sqlite:///{(DATA / 'crivo.db').as_posix()}"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"

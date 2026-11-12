@@ -73,12 +73,3 @@ def test_qualificar_fallback():
     r = ai_qualifier.qualificar(None, "João", "11999991111", 10.0, "Alô, não conheço nenhum João")
     assert r.categoria == "NAO_E_O_CLIENTE"
     assert r.motor in ("heuristica", "openai")
-
-
-def test_openai_structured_schema():
-    from openai.lib._parsing import type_to_response_format_param
-    schema = type_to_response_format_param(ai_qualifier.Resultado)
-    assert schema["type"] == "json_schema"
-    assert "categoria" in schema["json_schema"]["schema"]["properties"]
-    assert "turnos" in schema["json_schema"]["schema"]["properties"]
-

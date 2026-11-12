@@ -55,7 +55,10 @@ CATEGORIES: dict[str, dict] = {
     "INDETERMINADO": {
         "label": "Indeterminado",
         "desc": "Não foi possível classificar (áudio ausente/ilegível).",
-        "subs": {"SEM_DADOS": "Sem dados suficientes"},
+        "subs": {
+            "SEM_DADOS": "Sem dados suficientes",
+            "AUDIO_INAUDIVEL": "Áudio inaudível / ininteligível",
+        },
     },
 }
 

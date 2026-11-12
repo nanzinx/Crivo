@@ -32,6 +32,7 @@ def apply_filters(
     tipo_discagem: str | None = None,
     desligado_por: str | None = None,
     divergencia: bool | None = None,
+    revisao: bool | None = None,
 ):
     if data_inicio:
         stmt = stmt.where(Call.data_ligacao >= datetime.combine(data_inicio, time.min))
@@ -65,6 +66,8 @@ def apply_filters(
         stmt = stmt.where(Call.desligado_por == desligado_por)
     if divergencia is not None:
         stmt = stmt.where(Call.divergencia_tabulacao.is_(divergencia))
+    if revisao is not None:
+        stmt = stmt.where(Call.precisa_revisao.is_(True) if revisao else Call.precisa_revisao.is_not(True))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -116,6 +119,10 @@ def serialize(c: Call, full: bool = False) -> dict:
         "conflito_identidade": c.conflito_identidade,
         "divergencia_tabulacao": bool(c.divergencia_tabulacao),
         "divergencia_detalhe": c.divergencia_detalhe,
+        "precisa_revisao": bool(c.precisa_revisao),
+        "revisao_motivo": c.revisao_motivo,
+        "fala_segundos": c.fala_segundos,
+        "custo_usd": round(c.custo_usd or 0, 5),
         "ligacao_referencia_id": c.ligacao_referencia_id,
         "tem_audio": bool(c.caminho_audio),
         "erro": c.erro,
@@ -147,13 +154,14 @@ class Filtros:
         tipo_discagem: str | None = None,
         desligado_por: str | None = None,
         divergencia: bool | None = None,
+        revisao: bool | None = None,
         q: str | None = None,
         status: str | None = None,
     ):
         self.kw = dict(data_inicio=data_inicio, data_fim=data_fim, categoria=categoria, subcategoria=subcategoria,
                        telefone=telefone, operador=operador, campanha=campanha, q=q, status=status, tronco=tronco,
                        tipo_agente=tipo_agente, tipo_discagem=tipo_discagem, desligado_por=desligado_por,
-                       divergencia=divergencia)
+                       divergencia=divergencia, revisao=revisao)
 
     def __call__(self, stmt, **override):
         return apply_filters(stmt, **{**self.kw, **override})
@@ -187,7 +195,7 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
     writer.writerow([
         "ID Ligação", "Data/Hora", "Telefone", "Cliente", "Operador", "Tipo Agente", "Origem Discagem", "Tronco",
         "Desligado Por", "Sinalização SIP", "Tabulação Operador", "Categoria IA", "Subcategoria IA", "Confiança",
-        "Divergência?", "Detalhe Divergência", "Duração (seg)", "Sentimento Cliente", "Status", "Resumo",
+        "Divergência?", "Detalhe Divergência", "Revisar?", "Motivo da Revisão", "Duração (seg)", "Sentimento Cliente", "Status", "Resumo",
     ])
     for c in rows:
         writer.writerow([
@@ -207,6 +215,8 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
             f"{c.confianca:.2f}".replace(".", ",") if c.confianca is not None else "",
             "SIM" if c.divergencia_tabulacao else "NÃO",
             c.divergencia_detalhe or "",
+            "SIM" if c.precisa_revisao else "NÃO",
+            c.revisao_motivo or "",
             f"{c.duracao_segundos:.1f}".replace(".", ",") if c.duracao_segundos else "0",
             c.sentimento_cliente or "",
             c.status,
@@ -350,6 +360,9 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
         "troncos": _distribuicao(db, f, Call.tronco, "tronco"),
         "divergencias": {"total": total_div, "comparaveis": comparaveis,
                          "taxa": round(100 * total_div / comparaveis, 1) if comparaveis else 0},
+        "revisao": db.scalar(f(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True)))) or 0,
+        "sem_ia": db.scalar(f(select(func.count(Call.id)).where(Call.motor == "local"))) or 0,
+        "custo_usd": round(db.scalar(f(select(func.coalesce(func.sum(Call.custo_usd), 0.0)))) or 0, 4),
         "matriz_contraste": sorted(matriz.values(), key=lambda x: -x["total"])[:15],
         "ranking_operadores": ranking,
         "categorias": sorted(cats.values(), key=lambda c: -c["total"]),

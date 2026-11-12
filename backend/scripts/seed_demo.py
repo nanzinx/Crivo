@@ -15,7 +15,7 @@ from sqlalchemy import delete
 
 from app.database import SessionLocal, init_db
 from app.models import Call
-from app.services import pipeline, status
+from app.services import custos, pipeline, status
 
 OPERADORES = ["Ana Lima", "Bruno Costa", "Carla Dias", "Diego Rocha", "Elisa Prado", "Fábio Nunes",
               "Gabi Torres", "Hugo Melo", "Íris Campos", "João Reis"]
@@ -103,11 +103,22 @@ def gerar(n: int, seed: int = 42) -> int:
             )
             c.desligamento_detalhe = {"CLIENTE": "Atendimento: BYE recebido.", "OPERADOR": "Atendimento: BYE enviado.",
                                       "OUTRO": "CANCEL / timeout"}[c.desligado_por]
+            sem_fala = sub == "MUDO_TOTAL"
+            c.fala_segundos = 0.0 if sem_fala else round(dur * rng.uniform(0.35, 0.8), 1)
+            c.metricas_acusticas = {"vad": True, "fala_segundos": c.fala_segundos, "duracao_segundos": c.duracao_segundos,
+                                    "canais": 2, "fala_por_canal": [round(c.fala_segundos * 0.55, 1),
+                                                                    round(c.fala_segundos * (0.45 if falas and len(falas) > 1 else 0.0), 1)]}
             if st == "done":
                 c.categoria, c.subcategoria = cat, sub
-                c.confianca = round(rng.uniform(0.62, 0.98), 2)
-                c.motor = "openai"
-                c.resumo = f"Demonstração: cenário {sub.replace('_', ' ').lower()}."
+                # ~8% com confiança baixa e ~2% inaudíveis: alimentam a fila de revisão humana
+                c.confianca = round(rng.uniform(0.40, 0.58) if rng.random() < 0.08 else rng.uniform(0.66, 0.98), 2)
+                if not sem_fala and rng.random() < 0.02:
+                    c.categoria, c.subcategoria, c.confianca = "INDETERMINADO", "AUDIO_INAUDIVEL", 0.25
+                c.motor = "local" if sem_fala else "openai"
+                if sem_fala:
+                    c.confianca = 0.95
+                c.resumo = ("Nenhuma fala detectada no áudio (análise local, sem uso de IA)." if sem_fala
+                            else f"Demonstração: cenário {sub.replace('_', ' ').lower()}.")
                 c.evidencia = turnos[-1]["text"] if turnos else ""
                 c.transcricao = " ".join(t["text"] for t in turnos)
                 c.transcricao_diarizada = turnos or None
@@ -117,6 +128,18 @@ def gerar(n: int, seed: int = 42) -> int:
             elif st == "error":
                 c.erro = "classificação: 429 rate limit (demonstração)"
             db.add(c)
+            if st == "done" and c.motor == "openai":  # custo simulado: transcrição + classificação
+                db.flush()
+                for tipo, kw in (("transcricao", {"audio_segundos": c.duracao_segundos}),
+                                 ("classificacao", {"tokens_entrada": 1150 + int(dur * 2), "tokens_saida": rng.randint(70, 130)})):
+                    modelo = "gpt-4o-mini-transcribe" if tipo == "transcricao" else "gpt-4o-mini"
+                    custos.registrar(db, c, tipo, modelo, **kw)
+                    db.flush()
+                # espalha o gasto pelos dias das ligações (para o gráfico de custo)
+        db.commit()
+        from sqlalchemy import text
+        db.execute(text("UPDATE ia_uso SET em = (SELECT data_ligacao FROM calls WHERE calls.id = ia_uso.call_id) "
+                        "WHERE call_id IN (SELECT id FROM calls WHERE origem = 'demo')"))
         db.commit()
     status.registrar(status.IA, True, "Dados de demonstração gerados")
     status.registrar(status.IMPORTACAO, True, f"{n} ligações de demonstração")
@@ -125,6 +148,8 @@ def gerar(n: int, seed: int = 42) -> int:
 
 def limpar() -> int:
     with SessionLocal() as db:
+        from sqlalchemy import text
+        db.execute(text("DELETE FROM ia_uso WHERE call_id IN (SELECT id FROM calls WHERE origem = 'demo')"))
         n = db.execute(delete(Call).where(Call.origem == "demo")).rowcount
         db.commit()
     return n

@@ -29,17 +29,37 @@ async def _poll_argus():
             log.exception("polling Argus")
 
 
+async def _retomar_aguardando():
+    """A cada 10 min, retoma as ligações "aguardando IA" quando há chave e o teto diário permite."""
+    from .database import SessionLocal
+    from .services import custos
+
+    while True:
+        await asyncio.sleep(600)
+        try:
+            if not settings.openai_api_key:
+                continue
+            with SessionLocal() as db:
+                bloqueado = custos.teto_atingido(db)
+            if not bloqueado:
+                await asyncio.to_thread(worker.enqueue_aguardando)
+        except Exception:  # pragma: no cover
+            log.exception("retomada de ligações aguardando IA")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     worker.start()
     task = asyncio.create_task(_poll_argus()) if settings.argus_token and argus_client.campaign_ids() else None
+    retomada = asyncio.create_task(_retomar_aguardando())
     yield
+    retomada.cancel()
     if task:
         task.cancel()
 
 
-app = FastAPI(title="Crivo", description="Auditoria de ligações: Argus × IA", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Crivo", description="Auditoria de ligações: Argus × IA", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_list, allow_methods=["*"], allow_headers=["*"])
 app.include_router(calls.router)
 app.include_router(webhooks.router)

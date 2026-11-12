@@ -9,7 +9,7 @@ from .. import worker
 from ..config import settings
 from ..database import get_db
 from ..models import Call, agora
-from ..services import argus_client, status
+from ..services import argus_client, custos, status
 
 router = APIRouter(prefix="/api/v1", tags=["saude"])
 
@@ -32,7 +32,7 @@ def _em_horario_comercial(now: datetime) -> bool:
     return now.weekday() < 6 and ini <= now.hour < fim
 
 
-def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime) -> list[dict]:
+def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: dict | None = None) -> list[dict]:
     out: list[dict] = []
     add = lambda nivel, titulo, msg: out.append({"nivel": nivel, "titulo": titulo, "mensagem": msg})  # noqa: E731
     argus_on = bool(settings.argus_token)
@@ -60,6 +60,17 @@ def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime) -> list[
         add("atencao", "IA não configurada", f"{aguardando} ligações aguardando OPENAI_API_KEY.")
     if erros := por_status.get("error", 0):
         add("atencao", "Ligações com erro", f"{erros} ligações falharam e podem ser reprocessadas.")
+    if custo:
+        pct = custo.get("teto_pct")
+        if pct is not None and pct >= 100:
+            add("critico", "Teto diário de IA atingido",
+                f"Gasto de hoje: US$ {custo['hoje_usd']:.2f} (teto US$ {custo['teto_diario_usd']:.2f}). "
+                "Novas ligações aguardam até amanhã.")
+        elif pct is not None and pct >= 80:
+            add("atencao", "Perto do teto diário de IA", f"{pct:.0f}% do teto de US$ {custo['teto_diario_usd']:.2f} usado hoje.")
+        if custo.get("modelos_sem_preco"):
+            add("atencao", "Modelo sem preço cadastrado",
+                f"Custo de {', '.join(custo['modelos_sem_preco'])} não está sendo contado. Defina os preços no .env.")
     if fila > settings.alerta_fila_max:
         add("atencao", "Fila acumulada", f"{fila} ligações aguardando processamento.")
     return out
@@ -74,6 +85,7 @@ def saude(db: Session = Depends(get_db)):
     por_status = dict(db.execute(select(Call.status, func.count()).group_by(Call.status)).all())
     fila = worker.queue_size()
 
+    custo = custos.resumo(db)
     erros = db.scalars(select(Call).where(Call.status == "error").order_by(Call.id.desc()).limit(15)).all()
     ultimas_24h = db.scalar(select(func.count(Call.id)).where(Call.criado_em >= now - timedelta(hours=24))) or 0
     ultima = db.scalar(select(func.max(Call.data_ligacao)))
@@ -96,5 +108,7 @@ def saude(db: Session = Depends(get_db)):
              "erro": c.erro, "operador_nome": c.operador_nome}
             for c in erros
         ],
-        "alertas": _alertas(eventos, por_status, fila, now),
+        "custos": custo,
+        "revisao_pendente": db.scalar(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True))) or 0,
+        "alertas": _alertas(eventos, por_status, fila, now, custo),
     }

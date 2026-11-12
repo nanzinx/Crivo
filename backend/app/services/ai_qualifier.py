@@ -18,9 +18,10 @@ from ..taxonomy import CATEGORIES, valid
 class QualificacaoError(RuntimeError):
     """Falha da IA. `transcricao` guarda o que já foi transcrito (para não pagar o Whisper de novo)."""
 
-    def __init__(self, msg: str, transcricao: str | None = None):
+    def __init__(self, msg: str, transcricao: str | None = None, uso: list[dict] | None = None):
         super().__init__(msg)
         self.transcricao = transcricao
+        self.uso = uso or []  # o que já foi pago antes da falha (ex.: a transcrição)
 
 
 class Turno(BaseModel):
@@ -29,7 +30,27 @@ class Turno(BaseModel):
     sentiment: Optional[str] = None  # calmo | revoltado | neutro
 
 
+class RespostaIA(BaseModel):
+    """O que pedimos para a IA devolver. Enxuto de propósito: texto de saída é o token mais caro,
+    e a transcrição já está conosco (não faz sentido pagar para o modelo repeti-la)."""
+
+    categoria: str
+    subcategoria: Optional[str] = None
+    confianca: float = 0.5
+    resumo: str = ""
+    evidencia: str = ""
+    sentimento_cliente: Optional[str] = None
+
+
+class RespostaIADiarizada(RespostaIA):
+    """Variante opcional (IA_DIARIZAR=true): a IA também separa a conversa por falante."""
+
+    turnos: List[Turno] = []
+
+
 class Resultado(BaseModel):
+    """Resultado interno da qualificação (IA, heurística ou análise local)."""
+
     categoria: str
     subcategoria: Optional[str] = None
     confianca: float = 0.5
@@ -39,6 +60,7 @@ class Resultado(BaseModel):
     turnos: List[Turno] = []
     sentimento_cliente: Optional[str] = None
     motor: str = "heuristica"
+    uso: List[dict] = []  # chamadas pagas: {tipo, modelo, audio_segundos, tokens_entrada, tokens_saida}
 
 
 def _norm(s: str) -> str:
@@ -132,19 +154,32 @@ Diretrizes obrigatórias de classificação:
    - FAX_MODEM: Sinal técnico de modem/fax.
    - NUMERO_INEXISTENTE: Mensagem de número inexistente ou bloqueado.
 
+6. 'INDETERMINADO': Use quando NÃO houver base para decidir. Não chute.
+   - AUDIO_INAUDIVEL: Transcrição ininteligível, truncada ou sem sentido (áudio ruim).
+   - SEM_DADOS: Há fala compreensível, mas insuficiente para enquadrar em qualquer categoria.
+
+Regra de segurança: o resultado é usado para avaliar o trabalho do operador. Se a transcrição for
+duvidosa, prefira INDETERMINADO ou uma `confianca` baixa (< 0.6) a afirmar algo que não está claro.
+
 Instruções de saída:
 - `categoria`: Código exato da categoria.
 - `subcategoria`: Código exato da subcategoria.
 - `confianca`: Valor entre 0.0 e 1.0.
 - `resumo`: Breve explicação de 1 a 2 frases fundamentando a escolha.
-- `evidencia`: Citação textual literal exata do trecho da fala que comprova a decisão.
-- `turnos`: Lista de falas diarizadas com `speaker` ('ATENDENTE', 'CLIENTE' ou 'URA'), `text` e `sentiment` ('calmo', 'revoltado' ou 'neutro').
+- `evidencia`: Citação textual literal exata do trecho da fala que comprova a decisão (curta).
 - `sentimento_cliente`: Sentimento geral ('calmo', 'revoltado', 'neutro' ou nulo se mudo/ura).
+"""
+
+_PROMPT_TURNOS = """- `turnos`: Lista de falas diarizadas com `speaker` ('ATENDENTE', 'CLIENTE' ou 'URA'), `text` e `sentiment` ('calmo', 'revoltado' ou 'neutro').
 """
 
 
 def _tax_text() -> str:
-    return "\n".join(f"- {c}: {', '.join(v['subs'])}" for c, v in CATEGORIES.items() if c != "INDETERMINADO")
+    return "\n".join(f"- {c}: {', '.join(v['subs'])}" for c, v in CATEGORIES.items())
+
+
+def montar_prompt() -> str:
+    return _SYSTEM_PROMPT.format(tax=_tax_text()) + (_PROMPT_TURNOS if settings.ia_diarizar else "")
 
 
 def _cliente_openai():
@@ -153,13 +188,14 @@ def _cliente_openai():
     return OpenAI(api_key=settings.openai_api_key)
 
 
-def transcrever_audio(client, audio_path: str) -> str:
+def transcrever_audio(client, audio_path: str, modelo: str | None = None) -> str:
     with open(audio_path, "rb") as f:
-        tr = client.audio.transcriptions.create(model=settings.openai_whisper_model, file=f, language="pt")
+        tr = client.audio.transcriptions.create(model=modelo or settings.openai_whisper_model, file=f, language="pt")
     return getattr(tr, "text", "") or ""
 
 
-def _classificar_texto(client, texto: str, nome, tel, dur) -> Resultado | None:
+def _classificar_texto(client, texto: str, nome, tel, dur, modelo: str | None = None):
+    """Devolve (resposta, tokens_entrada, tokens_saida)."""
     user_prompt = (
         f"Metadados da ligação:\n"
         f"- Nome esperado do titular: {nome or '(não informado)'}\n"
@@ -168,40 +204,45 @@ def _classificar_texto(client, texto: str, nome, tel, dur) -> Resultado | None:
         f"Transcrição da chamada:\n\"\"\"\n{texto}\n\"\"\""
     )
     resp = client.beta.chat.completions.parse(
-        model=settings.openai_model,
+        model=modelo or settings.openai_model,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT.format(tax=_tax_text())},
+            {"role": "system", "content": montar_prompt()},
             {"role": "user", "content": user_prompt},
         ],
-        response_format=Resultado,
+        response_format=RespostaIADiarizada if settings.ia_diarizar else RespostaIA,
     )
-    return resp.choices[0].message.parsed
+    u = getattr(resp, "usage", None)
+    return (resp.choices[0].message.parsed, getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
 
 
 def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None, dur: float | None,
                        transcricao: str | None = None) -> Resultado:
     client = _cliente_openai()
-    texto = transcricao
+    texto, uso = transcricao, []
     if not texto and audio_path and Path(audio_path).exists():
         try:
             texto = transcrever_audio(client, audio_path)
         except Exception as e:
             raise QualificacaoError(f"transcrição: {str(e)[:300]}") from e
+        uso.append({"tipo": "transcricao", "modelo": settings.openai_whisper_model, "audio_segundos": float(dur or 0)})
     texto = texto or ""
 
     try:
-        res = _classificar_texto(client, texto, nome, tel, dur)
+        res, tok_in, tok_out = _classificar_texto(client, texto, nome, tel, dur)
     except Exception as e:
-        raise QualificacaoError(f"classificação: {str(e)[:300]}", transcricao=texto or None) from e
+        raise QualificacaoError(f"classificação: {str(e)[:300]}", transcricao=texto or None, uso=uso) from e
+    uso.append({"tipo": "classificacao", "modelo": settings.openai_model, "tokens_entrada": tok_in, "tokens_saida": tok_out})
     if not res:
-        raise QualificacaoError("classificação: resposta vazia/recusada pelo modelo", transcricao=texto or None)
+        raise QualificacaoError("classificação: resposta vazia/recusada pelo modelo", transcricao=texto or None, uso=uso)
 
-    res.motor = "openai"
-    if not res.transcricao:
-        res.transcricao = texto
-    if not valid(res.categoria, res.subcategoria):
-        res.categoria, res.subcategoria = "INDETERMINADO", "SEM_DADOS"
-    return res
+    out = Resultado(
+        categoria=res.categoria, subcategoria=res.subcategoria, confianca=res.confianca, resumo=res.resumo,
+        evidencia=res.evidencia, sentimento_cliente=res.sentimento_cliente, transcricao=texto,
+        turnos=getattr(res, "turnos", None) or [], motor="openai", uso=uso,
+    )
+    if not valid(out.categoria, out.subcategoria):
+        out.categoria, out.subcategoria, out.confianca = "INDETERMINADO", "SEM_DADOS", min(out.confianca, 0.3)
+    return out
 
 
 def qualificar(audio_path: str | None, nome, tel, dur, transcricao: str | None = None) -> Resultado:
