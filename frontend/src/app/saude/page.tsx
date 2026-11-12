@@ -121,6 +121,16 @@ function CustoIA({ c }: { c: Custos }) {
           <Num label="Hoje" valor={fmtUsd(c.hoje_usd)} />
           <Num label="Neste mês" valor={fmtUsd(c.mes_usd)} />
           <Num label="Média por ligação com IA" valor={fmtUsd(c.custo_medio_usd)} sub={`${fmtInt(c.minutos_transcritos_mes)} min transcritos no mês`} />
+          <Num label="Ligações analisadas por IA no mês" valor={fmtInt(c.ligacoes_com_ia_mes)} />
+          <Num
+            label="Poupado pelo corte de silêncio"
+            valor={c.corte_silencio || c.minutos_economizados_mes ? `${fmtInt(c.minutos_economizados_mes)} min` : "desligado"}
+            sub={
+              c.corte_silencio || c.minutos_economizados_mes
+                ? `${c.economia_corte_pct.toLocaleString("pt-BR")}% a menos de áudio enviado no mês`
+                : "ative CORTAR_SILENCIO no .env"
+            }
+          />
           <Num
             label="Resolvidas sem IA no mês"
             valor={fmtInt(c.resolvidas_sem_ia_mes)}

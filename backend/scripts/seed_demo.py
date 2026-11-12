@@ -122,6 +122,14 @@ def gerar(n: int, seed: int = 42) -> int:
                 c.evidencia = turnos[-1]["text"] if turnos else ""
                 c.transcricao = " ".join(t["text"] for t in turnos)
                 c.transcricao_diarizada = turnos or None
+                lados = {t["speaker"] for t in turnos}
+                if lados == {"ATENDENTE", "CLIENTE"} and rng.random() < 0.5:
+                    # simula a transcrição por canal (estéreo): falas agrupadas por lado, não em ordem
+                    por_lado = [{"speaker": s, "text": " ".join(t["text"] for t in turnos if t["speaker"] == s),
+                                 "sentiment": None} for s in ("ATENDENTE", "CLIENTE")]
+                    c.transcricao_diarizada = por_lado
+                    c.transcricao = "\n".join(f"{t['speaker']}: {t['text']}" for t in por_lado)
+                    c.metricas_acusticas = {**c.metricas_acusticas, "transcricao_por_canal": True}
                 c.sentimento_cliente = "revoltado" if sub == "CLIENTE_REVOLTADO" else "calmo"
                 c.qualificado_em = c.data_ligacao + timedelta(minutes=2)
                 pipeline.calcular_divergencia(c)
@@ -130,7 +138,8 @@ def gerar(n: int, seed: int = 42) -> int:
             db.add(c)
             if st == "done" and c.motor == "openai":  # custo simulado: transcrição + classificação
                 db.flush()
-                for tipo, kw in (("transcricao", {"audio_segundos": c.duracao_segundos}),
+                enviado = round(c.duracao_segundos * rng.uniform(0.68, 0.9), 1)  # corte de silêncio simulado
+                for tipo, kw in (("transcricao", {"audio_segundos": enviado, "audio_segundos_original": c.duracao_segundos}),
                                  ("classificacao", {"tokens_entrada": 1150 + int(dur * 2), "tokens_saida": rng.randint(70, 130)})):
                     modelo = "gpt-4o-mini-transcribe" if tipo == "transcricao" else "gpt-4o-mini"
                     custos.registrar(db, c, tipo, modelo, **kw)

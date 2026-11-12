@@ -8,6 +8,11 @@ que tenham o áudio no disco.
 
 Uso (a partir de backend/, com OPENAI_API_KEY no .env):
     python -m scripts.comparar_transcricao --n 50 --modelos whisper-1,gpt-4o-mini-transcribe
+
+Para testar o TRATAMENTO do áudio (corte de silêncio e um lado por canal no estéreo), acrescente
+"+tratado" ao modelo. Sem o sufixo, o arquivo original é enviado inteiro:
+    python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,gpt-4o-mini-transcribe+tratado
+Só mantenha CORTAR_SILENCIO / TRANSCRICAO_POR_CANAL ligados se o acerto ficar igual ou melhor.
 """
 import argparse
 import random
@@ -34,15 +39,21 @@ def amostra(n: int, seed: int = 7) -> list[Call]:
 def avaliar(calls: list[Call], modelos: list[str]) -> dict[str, dict]:
     client = ai_qualifier._cliente_openai()
     out = {}
-    for modelo in modelos:
+    for variante in modelos:
+        modelo, tratado = variante.removesuffix("+tratado"), variante.endswith("+tratado")
         acertos = falhas = 0
-        custo = 0.0
+        custo = minutos = 0.0
         erros = []
         for c in calls:
             dur = c.duracao_segundos or audio_analyzer.analyze(c.caminho_audio).get("duracao_segundos") or 0
             try:
-                texto = ai_qualifier.transcrever_audio(client, c.caminho_audio, modelo)
-                custo += custos.calcular("transcricao", modelo, audio_segundos=dur)
+                if tratado:
+                    texto, uso, _ = ai_qualifier._transcrever(client, c.caminho_audio, dur, modelo)
+                    enviados = sum(u["audio_segundos"] for u in uso)
+                else:
+                    texto, enviados = ai_qualifier.transcrever_audio(client, c.caminho_audio, modelo), dur
+                minutos += enviados / 60
+                custo += custos.calcular("transcricao", modelo, audio_segundos=enviados)
                 res, tin, tout = ai_qualifier._classificar_texto(client, texto, c.nome_esperado, c.telefone, dur)
                 custo += custos.calcular("classificacao", settings.openai_model, tokens_entrada=tin, tokens_saida=tout)
             except Exception as e:
@@ -54,8 +65,8 @@ def avaliar(calls: list[Call], modelos: list[str]) -> dict[str, dict]:
             else:
                 erros.append((c.id, label_cat(c.categoria), label_cat(res.categoria) if res else "—"))
         n = len(calls)
-        out[modelo] = {"n": n, "acertos": acertos, "falhas": falhas, "acuracia": acertos / n if n else 0,
-                       "custo_usd": custo, "custo_por_ligacao": custo / n if n else 0, "erros": erros}
+        out[variante] = {"n": n, "acertos": acertos, "falhas": falhas, "acuracia": acertos / n if n else 0,
+                       "minutos": minutos, "custo_usd": custo, "custo_por_ligacao": custo / n if n else 0, "erros": erros}
     return out
 
 
@@ -71,14 +82,14 @@ def main():
         raise SystemExit("Sem gabarito: importe o CSV de escuta e as gravações (Saúde do sistema > Importar acervo local).")
     r = avaliar(calls, [m.strip() for m in a.modelos.split(",") if m.strip()])
     print(f"\n{len(calls)} ligações do gabarito (escuta manual)\n")
-    print(f"{'Modelo de transcrição':28s} {'acerto':>8s} {'falhas':>7s} {'custo':>10s} {'por ligação':>12s}")
+    print(f"{'Transcrição':36s} {'acerto':>8s} {'falhas':>7s} {'minutos':>8s} {'custo':>10s} {'por ligação':>12s}")
     for m, x in r.items():
-        print(f"{m:28s} {x['acuracia']:8.1%} {x['falhas']:7d} {x['custo_usd']:9.3f}$ {x['custo_por_ligacao']:11.5f}$")
+        print(f"{m:36s} {x['acuracia']:8.1%} {x['falhas']:7d} {x['minutos']:8.1f} {x['custo_usd']:9.3f}$ {x['custo_por_ligacao']:11.5f}$")
     for m, x in r.items():
         print(f"\nDiscordâncias com {m} (ligação, auditor, IA):")
         for e in x["erros"][:15]:
             print(f"   #{e[0]}: {e[1]}  ->  {e[2]}")
-    print("\n=> Troque o modelo (OPENAI_WHISPER_MODEL) só se o acerto ficar igual ou melhor.")
+    print("\n=> Adote um modelo mais barato ou o tratamento do áudio só se o acerto ficar igual ou melhor.")
 
 
 if __name__ == "__main__":

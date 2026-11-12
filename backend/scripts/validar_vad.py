@@ -38,6 +38,8 @@ def avaliar(n: int | None = None, seed: int = 7) -> dict:
     total = Counter()
     sem_fala = Counter()
     erros, seg_poupados, sem_vad = [], 0.0, 0
+    seg_total = seg_apos_corte = 0.0  # só das ligações com fala (as que iriam para a IA)
+    estereo = 0
     for c in calls:
         m = audio_analyzer.analyze(c.caminho_audio)
         if not m.get("vad"):
@@ -50,8 +52,13 @@ def avaliar(n: int | None = None, seed: int = 7) -> dict:
                 seg_poupados += m.get("duracao_segundos") or 0
             elif c.categoria != "INDETERMINADO":
                 erros.append((c.id, c.id_ligacao, c.categoria, m.get("fala_segundos"), c.nome_arquivo))
+        else:
+            seg_total += m.get("duracao_segundos") or 0
+            seg_apos_corte += m.get("duracao_apos_corte") or m.get("duracao_segundos") or 0
+            estereo += bool(m.get("fala_por_canal"))
     return {"analisadas": sum(total.values()), "sem_vad": sem_vad, "total": total, "sem_fala": sem_fala,
-            "erros": erros, "minutos_poupados": seg_poupados / 60}
+            "erros": erros, "minutos_poupados": seg_poupados / 60, "minutos_com_fala": seg_total / 60,
+            "minutos_apos_corte": seg_apos_corte / 60, "estereo_separado": estereo}
 
 
 def main():
@@ -70,6 +77,12 @@ def main():
     print(f"ERROS (tinham conversa e seriam descartadas): {len(r['erros'])}")
     for e in r["erros"][:30]:
         print(f"   ligação #{e[0]} (Argus {e[1]}) gabarito={label_cat(e[2])} fala={e[3]}s  {e[4] or ''}")
+    if r["minutos_com_fala"]:
+        eco = 1 - r["minutos_apos_corte"] / r["minutos_com_fala"]
+        print(f"\nCorte de silêncio (estimativa): {r['minutos_com_fala']:.1f} min -> {r['minutos_apos_corte']:.1f} min "
+              f"({eco:.0%} a menos de transcrição)")
+        print(f"Gravações em estéreo com os lados separados: {r['estereo_separado']} de {r['analisadas']}"
+              + ("" if r["estereo_separado"] else "  (configure ARGUS_AUDIO_CHANNELS=3 para separar operador e cliente)"))
     print("\n=> " + ("Seguro ativar a resolução local." if not r["erros"] else
                     "NÃO ative como está: ouça as ligações acima e ajuste VAD_FALA_MINIMA_SEGUNDOS."))
 

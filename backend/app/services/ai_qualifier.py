@@ -61,6 +61,7 @@ class Resultado(BaseModel):
     sentimento_cliente: Optional[str] = None
     motor: str = "heuristica"
     uso: List[dict] = []  # chamadas pagas: {tipo, modelo, audio_segundos, tokens_entrada, tokens_saida}
+    por_canal: bool = False  # transcrição feita um lado por canal (estéreo): `turnos` = falas agrupadas por lado
 
 
 def _norm(s: str) -> str:
@@ -161,6 +162,10 @@ Diretrizes obrigatórias de classificação:
 Regra de segurança: o resultado é usado para avaliar o trabalho do operador. Se a transcrição for
 duvidosa, prefira INDETERMINADO ou uma `confianca` baixa (< 0.6) a afirmar algo que não está claro.
 
+Formato da transcrição: quando vier em linhas "ATENDENTE: ..." e "CLIENTE: ...", o áudio era estéreo e
+cada linha reúne TODAS as falas daquele lado (não é a ordem cronológica). Nesse caso você sabe com certeza
+quem disse o quê. "(sem fala detectada neste lado da linha)" significa que aquele lado ficou mudo.
+
 Instruções de saída:
 - `categoria`: Código exato da categoria.
 - `subcategoria`: Código exato da subcategoria.
@@ -215,17 +220,60 @@ def _classificar_texto(client, texto: str, nome, tel, dur, modelo: str | None = 
     return (resp.choices[0].message.parsed, getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
 
 
+SEM_FALA = "(sem fala detectada neste lado da linha)"
+_LADO_RE = re.compile(r"^(ATENDENTE|CLIENTE): (.*)$")
+
+
+def turnos_do_texto(texto: str | None) -> list[Turno]:
+    """Reconstrói os lados a partir da transcrição rotulada ("ATENDENTE: ..." / "CLIENTE: ...").
+
+    Só vale para a transcrição por canal (estéreo): cada lado traz TODAS as suas falas juntas,
+    não é a ordem cronológica da conversa.
+    """
+    linhas = [_LADO_RE.match(l) for l in (texto or "").split("\n")]
+    if not linhas or not all(linhas) or len(linhas) > 2:
+        return []
+    return [Turno(speaker=m[1], text=m[2]) for m in linhas if m[2] != SEM_FALA]
+
+
+def _transcrever(client, audio_path: str, dur: float | None, modelo: str | None = None) -> tuple[str, list[dict], bool]:
+    """Transcreve o áudio já tratado (silêncio cortado; um lado por canal no estéreo).
+
+    Devolve (texto, uso pago, por_canal). Se um lado falhar, levanta QualificacaoError com o uso
+    já pago e SEM transcrição parcial (para a próxima tentativa não tratar meio áudio como inteiro).
+    """
+    from . import audio_analyzer
+
+    partes = audio_analyzer.preparar_para_transcricao(audio_path)
+    uso, textos = [], []
+    try:
+        for p in partes:
+            if not p.arquivo:
+                textos.append(SEM_FALA)
+                continue
+            try:
+                args = (client, p.arquivo) if modelo is None else (client, p.arquivo, modelo)
+                textos.append(transcrever_audio(*args).strip())
+            except Exception as e:
+                raise QualificacaoError(f"transcrição: {str(e)[:300]}", uso=uso) from e
+            uso.append({"tipo": "transcricao", "modelo": modelo or settings.openai_whisper_model,
+                        "audio_segundos": p.segundos or float(dur or 0),
+                        "audio_segundos_original": p.segundos_original or float(dur or 0)})
+    finally:
+        audio_analyzer.limpar(partes)
+    if partes[0].lado is None:
+        return textos[0], uso, False
+    return "\n".join(f"{p.lado}: {t.replace(chr(10), ' ')}" for p, t in zip(partes, textos)), uso, True
+
+
 def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None, dur: float | None,
                        transcricao: str | None = None) -> Resultado:
     client = _cliente_openai()
     texto, uso = transcricao, []
     if not texto and audio_path and Path(audio_path).exists():
-        try:
-            texto = transcrever_audio(client, audio_path)
-        except Exception as e:
-            raise QualificacaoError(f"transcrição: {str(e)[:300]}") from e
-        uso.append({"tipo": "transcricao", "modelo": settings.openai_whisper_model, "audio_segundos": float(dur or 0)})
+        texto, uso, _ = _transcrever(client, audio_path, dur)
     texto = texto or ""
+    lados = turnos_do_texto(texto)
 
     try:
         res, tok_in, tok_out = _classificar_texto(client, texto, nome, tel, dur)
@@ -238,7 +286,7 @@ def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None
     out = Resultado(
         categoria=res.categoria, subcategoria=res.subcategoria, confianca=res.confianca, resumo=res.resumo,
         evidencia=res.evidencia, sentimento_cliente=res.sentimento_cliente, transcricao=texto,
-        turnos=getattr(res, "turnos", None) or [], motor="openai", uso=uso,
+        turnos=getattr(res, "turnos", None) or lados, motor="openai", uso=uso, por_canal=bool(lados),
     )
     if not valid(out.categoria, out.subcategoria):
         out.categoria, out.subcategoria, out.confianca = "INDETERMINADO", "SEM_DADOS", min(out.confianca, 0.3)

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     argus_campaign_ids: str = ""  # ex.: "12,15" (usado no polling/backfill)
     argus_audio_format: str = "MP3"
     argus_audio_channels: int = 1  # 1 mono | 2 estéreo | 3 estéreo separando pontas A/B
+    argus_canal_operador: int = 0  # no estéreo separado: 0 = operador no canal esquerdo (ponta A), 1 = direito
     argus_webhook_secret: str = ""
     argus_poll_minutos: int = 5  # intervalo do polling de fallback
 
@@ -31,6 +32,10 @@ class Settings(BaseSettings):
     preco_transcricao_minuto: float = 0
     preco_entrada_1m: float = 0
     preco_saida_1m: float = 0
+
+    # ----- Tratamento do áudio antes de transcrever (sem IA) -----
+    cortar_silencio: bool = True  # remove espera/silêncio longos: a transcrição é cobrada por duração
+    transcricao_por_canal: bool = True  # estéreo separado: transcreve operador e cliente em separado
 
     # ----- Detecção local de fala (sem IA) -----
     vad_ativo: bool = True

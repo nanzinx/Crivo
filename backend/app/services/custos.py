@@ -47,10 +47,11 @@ def calcular(tipo: str, modelo: str, audio_segundos: float = 0, tokens_entrada: 
 
 
 def registrar(db: Session, call: Call | None, tipo: str, modelo: str, audio_segundos: float = 0,
-              tokens_entrada: int = 0, tokens_saida: int = 0) -> float:
+              tokens_entrada: int = 0, tokens_saida: int = 0, audio_segundos_original: float | None = None) -> float:
     """Registra uma chamada paga e soma no acumulado da ligação. Não faz commit."""
     custo = calcular(tipo, modelo, audio_segundos, tokens_entrada, tokens_saida)
     db.add(IaUso(call_id=call.id if call else None, tipo=tipo, modelo=modelo, audio_segundos=audio_segundos or 0,
+                 audio_segundos_original=audio_segundos_original,
                  tokens_entrada=tokens_entrada or 0, tokens_saida=tokens_saida or 0, custo_usd=custo, em=agora()))
     if call is not None:
         call.custo_usd = (call.custo_usd or 0) + custo
@@ -90,6 +91,13 @@ def resumo(db: Session, dias: int = 14) -> dict:
     gasto_h, gasto_m = gasto_desde(db, hoje), gasto_desde(db, mes)
     ligacoes_ia = db.scalar(select(func.count(func.distinct(IaUso.call_id))).where(IaUso.em >= mes)) or 0
     minutos = (db.scalar(select(func.coalesce(func.sum(IaUso.audio_segundos), 0.0)).where(IaUso.em >= mes)) or 0) / 60
+    # Economia do corte de silêncio. No estéreo cada lado é uma linha com a mesma duração original,
+    # então a gravação conta uma vez por ligação (max) e o enviado é a soma dos lados.
+    por_ligacao = (select(func.max(IaUso.audio_segundos_original).label("orig"), func.sum(IaUso.audio_segundos).label("env"))
+                   .where(IaUso.em >= mes, IaUso.tipo == "transcricao", IaUso.audio_segundos_original.is_not(None))
+                   .group_by(IaUso.call_id).subquery())
+    orig, env = db.execute(select(func.coalesce(func.sum(por_ligacao.c.orig), 0.0),
+                                  func.coalesce(func.sum(por_ligacao.c.env), 0.0))).one()
     sem_ia = db.scalar(select(func.count(Call.id)).where(Call.motor == "local", Call.qualificado_em >= mes)) or 0
 
     dia = func.date(IaUso.em)
@@ -107,12 +115,16 @@ def resumo(db: Session, dias: int = 14) -> dict:
         "ligacoes_com_ia_mes": ligacoes_ia,
         "custo_medio_usd": round(gasto_m / ligacoes_ia, 5) if ligacoes_ia else 0,
         "minutos_transcritos_mes": round(minutos, 1),
+        "minutos_economizados_mes": round(max(0.0, orig - env) / 60, 1),
+        "economia_corte_pct": round(100 * (orig - env) / orig, 1) if orig else 0,
         "resolvidas_sem_ia_mes": sem_ia,
         "teto_diario_usd": teto,
         "teto_pct": round(100 * gasto_h / teto, 1) if teto > 0 else None,
         "modelo_transcricao": settings.openai_whisper_model,
         "modelo_classificacao": settings.openai_model,
         "diarizacao": settings.ia_diarizar,
+        "corte_silencio": settings.cortar_silencio,
+        "por_canal": settings.transcricao_por_canal,
         "modelos_sem_preco": modelos_sem_preco(),
         "serie": serie,
     }

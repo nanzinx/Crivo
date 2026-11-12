@@ -154,6 +154,8 @@ def _concluir(db: Session, call: Call, res: "ai_qualifier.Resultado") -> None:
     call.confianca, call.resumo, call.evidencia = res.confianca, res.resumo, res.evidencia
     call.transcricao = res.transcricao or call.transcricao
     call.transcricao_diarizada = [t.model_dump() for t in res.turnos] or None
+    if res.por_canal:  # reatribui o dicionário para o banco perceber a mudança
+        call.metricas_acusticas = {**(call.metricas_acusticas or {}), "transcricao_por_canal": True}
     call.sentimento_cliente = res.sentimento_cliente
     call.motor = res.motor
     call.status, call.erro = "done", None
@@ -166,7 +168,7 @@ def _concluir(db: Session, call: Call, res: "ai_qualifier.Resultado") -> None:
 def _registrar_uso(db: Session, call: Call, uso: list[dict]) -> None:
     for u in uso:
         custos.registrar(db, call, u["tipo"], u["modelo"], u.get("audio_segundos", 0),
-                         u.get("tokens_entrada", 0), u.get("tokens_saida", 0))
+                         u.get("tokens_entrada", 0), u.get("tokens_saida", 0), u.get("audio_segundos_original"))
 
 
 def qualificar_call(db: Session, call: Call, force: bool = False) -> Call:

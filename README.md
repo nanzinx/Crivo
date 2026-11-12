@@ -16,7 +16,7 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-50%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-69%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -218,6 +218,9 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `IA_TETO_DIARIO_USD` | Teto de gasto por dia (0 = sem teto) | `0` |
 | `IA_DIARIZAR` | A IA também separa a conversa por falante (mais caro) | `false` |
 | `VAD_ATIVO` | Resolver ligações sem fala localmente, sem IA | `true` |
+| `CORTAR_SILENCIO` | Cortar espera e silêncio longos antes de transcrever | `true` |
+| `TRANSCRICAO_POR_CANAL` | No estéreo separado, transcrever operador e cliente em separado | `true` |
+| `ARGUS_CANAL_OPERADOR` | Canal do operador no estéreo (`0` esquerdo, `1` direito) | `0` |
 | `CONFIANCA_MINIMA_DIVERGENCIA` | Abaixo disso, vai para revisão humana em vez de divergência | `0.6` |
 | `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
 | `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
@@ -252,6 +255,8 @@ Cerca de 90% do custo é a **transcrição**, cobrada por minuto de áudio; a cl
 | Medida | Efeito | Risco para a auditoria |
 |---|---|---|
 | Ligação sem nenhuma fala resolvida localmente | Não paga transcrição nem classificação | Nenhum, se validado (script abaixo) |
+| Corte de silêncio e espera antes de transcrever | Menos minutos pagos (cerca de 20% numa conversa com espera) | Baixo; valide com `+tratado` (abaixo) |
+| Estéreo: um lado por canal | Custo parecido com o do mono cortado, e o sistema sabe quem disse o quê | Baixo; valide com `+tratado` |
 | Resposta enxuta da IA (não repete a transcrição) | Resposta ~5× menor | Nenhum |
 | Reaproveitar a transcrição ao reanalisar | Não paga duas vezes | Nenhum |
 | `gpt-4o-mini-transcribe` no lugar do `whisper-1` | ~50% do custo de transcrição | Precisa ser validado (script abaixo) |
@@ -277,8 +282,22 @@ python -m scripts.comparar_transcricao --n 50 --modelos whisper-1,gpt-4o-mini-tr
 
 **Custa dinheiro** (algo na casa de US$ 1 para 50 ligações e dois modelos). Compara os modelos de transcrição pelo que importa: a categoria final bate com a dos auditores? Troque o modelo só se o acerto ficar igual ou melhor.
 
+Para testar o tratamento do áudio (corte de silêncio e um lado por canal), acrescente `+tratado` ao modelo. Sem o sufixo, o arquivo vai inteiro:
+
+```bash
+cd backend
+python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,gpt-4o-mini-transcribe+tratado
+```
+
+### Tratamento do áudio antes de transcrever
+
+- **Corte de silêncio (`CORTAR_SILENCIO`).** Na ligação inteira, só é removido o miolo de silêncios de 2 s ou mais, deixando 0,5 s em cada ponta. O limite do que conta como silêncio é mais sensível que o da detecção de fala: voz baixa é mantida. Se a economia for menor que 10%, o arquivo original vai sem alteração.
+- **Um lado por canal (`TRANSCRICAO_POR_CANAL`).** Com `ARGUS_AUDIO_CHANNELS=3`, operador e cliente vêm em canais separados. Cada lado é transcrito sozinho, sem o silêncio de quando o outro fala, e a IA recebe o texto já identificado (`ATENDENTE:` / `CLIENTE:`). Um lado sem fala não é transcrito, mas a IA continua decidindo a categoria.
+- **Qual canal é o operador (`ARGUS_CANAL_OPERADOR`).** `0` = esquerdo, `1` = direito. Confira abrindo uma ligação: se operador e cliente aparecerem trocados, mude o valor.
+- No detalhe da ligação, cada balão reúne **todas as falas daquele lado**; não é a ordem da conversa.
+
 > [!NOTE]
-> Com `IA_DIARIZAR=false` (padrão), a transcrição aparece como texto corrido, sem os balões por falante. Os balões voltam com `IA_DIARIZAR=true`, pagando uma resposta maior da IA. A separação real por falante, a partir do áudio estéreo, está no roadmap.
+> Com áudio mono e `IA_DIARIZAR=false` (padrão), a transcrição aparece como texto corrido. Com áudio estéreo separado, os balões por lado voltam sem custo extra. `IA_DIARIZAR=true` pede à IA a conversa em ordem, pagando uma resposta maior.
 
 ---
 
@@ -374,10 +393,13 @@ cd frontend && npm run typecheck && npm run build
   - Resposta enxuta da IA e modelo de transcrição mais barato (com script de validação).
   - Ligações sem fala resolvidas sem IA; aviso de "tabulou muda, mas tem conversa".
   - Sem segurança, não acusa: indeterminado e baixa confiança vão para revisão humana.
-- [ ] **Custo de IA, etapa 2.**
-  - Cortar silêncio e espera antes de transcrever.
-  - Separação por falante a partir do áudio estéreo (`ARGUS_AUDIO_CHANNELS=3`), sem IA.
+- [x] **Custo de IA, etapa 2.**
+  - Corte de silêncio e espera antes de transcrever.
+  - Separação por lado a partir do áudio estéreo (`ARGUS_AUDIO_CHANNELS=3`), sem IA.
+  - Painel mostra os minutos poupados; scripts de validação cobrem o tratamento.
+- [ ] **Custo de IA, etapa 3.**
   - Avaliar transcrição própria (faster-whisper) ou provedor mais barato.
+  - Conversa em ordem cronológica no estéreo (exige marcação de tempo na transcrição).
 - [ ] **Semana 2: modelo de tabulação.**
   - Tabela de equivalência por ID de tabulação do Argus, editável na tela.
   - Taxonomia v2: desligou na abertura, pediu para não ligar (LGPD), ligação caiu, já é cliente.

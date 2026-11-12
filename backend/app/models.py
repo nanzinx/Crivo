@@ -109,7 +109,8 @@ class IaUso(Base):
     em: Mapped[datetime] = mapped_column(DateTime, default=agora, index=True)
     tipo: Mapped[str] = mapped_column(String(20))  # transcricao | classificacao
     modelo: Mapped[str] = mapped_column(String(64))
-    audio_segundos: Mapped[float] = mapped_column(Float, default=0)
+    audio_segundos: Mapped[float] = mapped_column(Float, default=0)  # duração enviada (paga)
+    audio_segundos_original: Mapped[float | None] = mapped_column(Float)  # duração da gravação, antes do corte
     tokens_entrada: Mapped[int] = mapped_column(Integer, default=0)
     tokens_saida: Mapped[int] = mapped_column(Integer, default=0)
     custo_usd: Mapped[float] = mapped_column(Float, default=0)

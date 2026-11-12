@@ -1,6 +1,5 @@
 """Redução de custo de IA sem perder auditoria: medição, resposta enxuta, detecção local de fala,
 teto diário e a regra "sem segurança, não acusa o operador"."""
-import wave
 from datetime import datetime
 
 import numpy as np
@@ -12,55 +11,9 @@ from app.database import SessionLocal
 from app.models import Call, IaUso
 from app.services import ai_qualifier, audio_analyzer, custos, pipeline
 
+from helpers import IAFalsa as _IAFalsa, fala as _fala, silencio as _silencio, wav as _wav  # noqa: E402
+
 SR = 8000
-
-
-def _wav(path, canais: list[np.ndarray]):
-    """Grava um WAV 8 kHz/16 bits com 1 ou 2 canais (arrays float -1..1)."""
-    data = np.stack(canais, axis=1) if len(canais) > 1 else canais[0][:, None]
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(data.shape[1])
-        w.setsampwidth(2)
-        w.setframerate(SR)
-        w.writeframes((np.clip(data, -1, 1) * 32767).astype("<i2").tobytes())
-    return str(path)
-
-
-def _silencio(seg: float) -> np.ndarray:
-    return np.random.default_rng(1).normal(0, 0.0005, int(seg * SR))  # chiado de linha bem baixo
-
-
-def _fala(seg_total: float, inicio: float, dur: float, seed=2) -> np.ndarray:
-    """Silêncio com um trecho de 'voz' (ruído forte) entre inicio e inicio+dur."""
-    x = _silencio(seg_total).copy()
-    a, b = int(inicio * SR), int((inicio + dur) * SR)
-    x[a:b] = np.random.default_rng(seed).normal(0, 0.2, b - a)
-    return x
-
-
-class _IAFalsa:
-    """Substitui a OpenAI nos testes."""
-
-    def __init__(self, monkeypatch, resposta=None, tokens=(1200, 100), falha_classificacao=False):
-        self.transcricoes = self.classificacoes = 0
-        monkeypatch.setattr(settings, "openai_api_key", "sk-teste")
-        monkeypatch.setattr(ai_qualifier, "_cliente_openai", lambda: object())
-        monkeypatch.setattr(ai_qualifier, "transcrever_audio", self._transcrever)
-        monkeypatch.setattr(ai_qualifier, "_classificar_texto", self._classificar)
-        self.resposta = resposta or ai_qualifier.RespostaIA(
-            categoria="SEM_INTERESSE", subcategoria="CLIENTE_CALMO", confianca=0.9, resumo="recusou",
-            evidencia="não tenho interesse")
-        self.tokens, self.falha = tokens, falha_classificacao
-
-    def _transcrever(self, client, path, modelo=None):
-        self.transcricoes += 1
-        return "alô, não tenho interesse, obrigado"
-
-    def _classificar(self, client, texto, nome, tel, dur, modelo=None):
-        self.classificacoes += 1
-        if self.falha:
-            raise RuntimeError("429 rate limit")
-        return self.resposta, *self.tokens
 
 
 # --------------------------------------------------------------------------- detecção local de fala
@@ -134,6 +87,7 @@ def test_sem_vad_confiavel_a_ligacao_segue_para_a_ia(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- medição de custo
 def test_custo_da_ligacao_e_registrado(tmp_path, monkeypatch):
     _IAFalsa(monkeypatch, tokens=(1200, 100))
+    monkeypatch.setattr(settings, "cortar_silencio", False)
     monkeypatch.setattr(settings, "openai_whisper_model", "gpt-4o-mini-transcribe")
     monkeypatch.setattr(settings, "openai_model", "gpt-4o-mini")
     with SessionLocal() as db:

@@ -129,6 +129,10 @@ export type Custos = {
   ligacoes_com_ia_mes: number;
   custo_medio_usd: number;
   minutos_transcritos_mes: number;
+  minutos_economizados_mes: number;
+  economia_corte_pct: number;
+  corte_silencio: boolean;
+  por_canal: boolean;
   resolvidas_sem_ia_mes: number;
   teto_diario_usd: number;
   teto_pct: number | null;

@@ -90,6 +90,7 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
   const qc = useQueryClient();
   const { data: c, isLoading } = useQuery({ queryKey: ["call", id], queryFn: () => api.call(id) });
   const [showRaw, setShowRaw] = useState(false);
+  const porCanal = Boolean(c?.metricas_acusticas?.transcricao_por_canal);
   const reprocess = useMutation({
     mutationFn: () => api.reprocessar(id),
     onSuccess: (r) => {
@@ -221,6 +222,13 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
                 <Headphones className="h-4 w-4 text-ink-muted" /> Transcrição
               </h3>
+              {porCanal && (
+                <p className="mb-3 rounded-xl bg-raised px-3 py-2 text-xs text-ink-2">
+                  Áudio estéreo: cada balão reúne <b className="font-semibold">todas as falas daquele lado</b> da linha, medidas pelo
+                  canal de áudio. Não é a ordem da conversa. Se operador e cliente estiverem trocados, ajuste{" "}
+                  <code className="font-mono">ARGUS_CANAL_OPERADOR</code>.
+                </p>
+              )}
               {c.transcricao_diarizada?.length ? (
                 <ol className="space-y-2">
                   {c.transcricao_diarizada.map((t, i) => {
