@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, ListMusic, PhoneIncoming, PhoneOutgoing } from "lucide-react";
+import { AlertTriangle, Ear, ChevronLeft, ChevronRight, Download, ListMusic, PhoneIncoming, PhoneOutgoing } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { CallDrawer, PlayButton } from "@/components/calls/call-drawer";
@@ -145,6 +145,11 @@ function Ligacoes() {
                           <AlertTriangle className="h-3 w-3" /> diverge
                         </Pill>
                       )}
+                      {c.precisa_revisao && (
+                        <Pill tone="warn">
+                          <Ear className="h-3 w-3" /> revisar
+                        </Pill>
+                      )}
                       {c.status !== "done" && <Pill tone={c.status === "error" ? "critical" : "neutral"}>{STATUS_LABEL[c.status]}</Pill>}
                     </div>
                   </div>
@@ -210,6 +215,13 @@ function Row({ c, items, active, onOpen, index }: { c: Call; items: Call[]; acti
       <td className="py-2.5 pr-3">
         <div className="flex items-center gap-2">
           {c.categoria && <CategoryBadge code={c.categoria} sub={c.subcategoria_label !== "-" ? c.subcategoria_label : null} />}
+          {c.precisa_revisao && (
+            <span title={c.revisao_motivo ?? "Precisa de revisão humana"}>
+              <Pill tone="warn">
+                <Ear className="h-3 w-3" /> revisar
+              </Pill>
+            </span>
+          )}
           {c.status !== "done" && <Pill tone={c.status === "error" ? "critical" : "neutral"}>{STATUS_LABEL[c.status]}</Pill>}
         </div>
         <div className={cn("mt-0.5 flex items-center gap-1 truncate text-xs", c.divergencia_tabulacao ? "text-critical" : "text-ink-muted")}>

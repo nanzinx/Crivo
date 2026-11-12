@@ -99,7 +99,8 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
   // "Pendente" (ainda sem análise da IA) não entra na comparação; aparece só no total da linha
   const cats: string[] = CATEGORIAS.filter((c) => data.some((r) => r.categorias[c]));
   const diverge = (esperada: string, cat: string) => {
-    if (cat === "PENDENTE" || ["OUTRO"].includes(esperada)) return false;
+    // Indeterminado nunca acusa o operador: vai para revisão humana
+    if (cat === "PENDENTE" || cat === "INDETERMINADO" || ["OUTRO"].includes(esperada)) return false;
     if (esperada === "MUDA_OU_CAIXA") return !["LIGACAO_MUDA", "CAIXA_POSTAL"].includes(cat);
     if (esperada === "NAO_TABULADO") return ["EM_NEGOCIACAO", "SEM_INTERESSE", "NAO_E_O_CLIENTE"].includes(cat);
     return esperada !== cat;
@@ -166,7 +167,7 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
       </div>
       <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
         <AlertTriangle className="h-3.5 w-3.5 text-critical" />
-        Contorno vermelho = a IA discorda do que o operador tabulou. Intensidade = participação na linha.
+        Contorno vermelho = a IA discorda do que o operador tabulou (casos com pouca confiança vão para revisão, não entram aqui). Intensidade = participação na linha.
       </p>
     </div>
   );

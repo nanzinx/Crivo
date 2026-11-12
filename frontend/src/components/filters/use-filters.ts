@@ -16,6 +16,7 @@ const KEYS: (keyof Filters)[] = [
   "tipo_discagem",
   "desligado_por",
   "divergencia",
+  "revisao",
   "status",
   "q",
 ];

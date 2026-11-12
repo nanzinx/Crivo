@@ -23,8 +23,8 @@ import { toast } from "sonner";
 import { CallDrawer } from "@/components/calls/call-drawer";
 import { Button, Card, Empty, Pill, Skeleton } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/stat-tile";
-import { api, type Evento, type Saude } from "@/lib/api";
-import { STATUS_LABEL, cn, fmtAgo, fmtDateTime, fmtInt, isoDate } from "@/lib/utils";
+import { api, type Custos, type Evento, type Saude } from "@/lib/api";
+import { STATUS_LABEL, cn, fmtAgo, fmtDateTime, fmtDay, fmtInt, fmtUsd, isoDate } from "@/lib/utils";
 
 export default function SaudePage() {
   const qc = useQueryClient();
@@ -74,6 +74,8 @@ export default function SaudePage() {
             </Card>
           </div>
 
+          <CustoIA c={data.custos} />
+
           <Card title="Erros recentes" subtitle="Ligações que falharam — reprocesse após corrigir a causa">
             {data.erros_recentes.length === 0 ? (
               <Empty icon={<CheckCircle2 className="h-5 w-5 text-good" />} title="Nenhuma ligação com erro" />
@@ -94,6 +96,102 @@ export default function SaudePage() {
         </>
       )}
       <CallDrawer id={open} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
+function CustoIA({ c }: { c: Custos }) {
+  const [hover, setHover] = useState<number | null>(null);
+  // Escala pelos gastos reais; a linha do teto só aparece quando cabe no gráfico (a barra ao lado já mostra o teto)
+  const pico = Math.max(...c.serie.map((d) => d.usd), 0.0001);
+  const tetoNoGrafico = c.teto_diario_usd > 0 && c.teto_diario_usd <= pico * 1.6;
+  const max = tetoNoGrafico ? Math.max(pico, c.teto_diario_usd) * 1.08 : pico * 1.08;
+  const totalMes = c.ligacoes_com_ia_mes + c.resolvidas_sem_ia_mes;
+  const pctSemIa = totalMes ? (100 * c.resolvidas_sem_ia_mes) / totalMes : 0;
+  const sel = hover != null ? c.serie[hover] : null;
+  const tetoTone = c.teto_pct == null ? "" : c.teto_pct >= 100 ? "bg-critical" : c.teto_pct >= 80 ? "bg-warn" : "bg-good";
+
+  return (
+    <Card
+      title="Custo de IA"
+      subtitle={`Estimado pelo preço de tabela · ${c.modelo_transcricao} + ${c.modelo_classificacao}${c.diarizacao ? " · com separação por falante" : ""}`}
+    >
+      <div className="grid gap-5 lg:grid-cols-5">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 lg:col-span-2">
+          <Num label="Hoje" valor={fmtUsd(c.hoje_usd)} />
+          <Num label="Neste mês" valor={fmtUsd(c.mes_usd)} />
+          <Num label="Média por ligação com IA" valor={fmtUsd(c.custo_medio_usd)} sub={`${fmtInt(c.minutos_transcritos_mes)} min transcritos no mês`} />
+          <Num
+            label="Resolvidas sem IA no mês"
+            valor={fmtInt(c.resolvidas_sem_ia_mes)}
+            sub={totalMes ? `${pctSemIa.toFixed(0)}% das analisadas (sem fala no áudio)` : "mudas detectadas localmente"}
+          />
+          <div className="col-span-2">
+            {c.teto_diario_usd > 0 ? (
+              <>
+                <div className="mb-1 flex justify-between text-xs text-ink-2">
+                  <span>Teto diário</span>
+                  <span className="num">
+                    {fmtUsd(c.hoje_usd)} de {fmtUsd(c.teto_diario_usd)} ({(c.teto_pct ?? 0).toFixed(0)}%)
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-raised">
+                  <motion.div className={cn("h-full rounded-full", tetoTone)} initial={{ width: 0 }} animate={{ width: `${Math.min(100, c.teto_pct ?? 0)}%` }} />
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-ink-muted">
+                Sem teto diário. Defina <code className="font-mono">IA_TETO_DIARIO_USD</code> no .env para limitar o gasto.
+              </p>
+            )}
+          </div>
+        </dl>
+
+        <div className="lg:col-span-3">
+          <div className="mb-2 flex items-baseline justify-between text-xs">
+            <span className="font-medium text-ink-2">Gasto por dia (14 dias)</span>
+            <span className="num text-ink-muted">{sel ? `${fmtDay(sel.data)}: ${fmtUsd(sel.usd)}` : "toque ou passe o mouse numa barra"}</span>
+          </div>
+          <div className="relative mt-4 flex h-32 items-end gap-[2px] border-b border-line" role="img" aria-label="Gasto diário com IA nos últimos 14 dias">
+            {tetoNoGrafico && (
+              <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-critical/60" style={{ bottom: `${(c.teto_diario_usd / max) * 100}%` }}>
+                <span className="absolute -top-3.5 left-0 bg-surface pr-1 text-[10px] text-critical">teto diário</span>
+              </div>
+            )}
+            {c.serie.map((d, i) => (
+              <div
+                key={d.data}
+                className="group flex h-full flex-1 items-end justify-center"
+                onMouseEnter={() => setHover(i)}
+                onMouseLeave={() => setHover(null)}
+                title={`${fmtDay(d.data)}: ${fmtUsd(d.usd)}`}
+              >
+                <motion.div
+                  className={cn("w-full max-w-[24px] rounded-t-[4px] transition-opacity", hover != null && hover !== i && "opacity-40")}
+                  style={{ background: "var(--seq)" }}
+                  initial={{ height: 0 }}
+                  animate={{ height: `${Math.max(d.usd > 0 ? 2 : 0, (d.usd / max) * 100)}%` }}
+                  transition={{ duration: 0.5, delay: i * 0.02 }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="num mt-1 flex justify-between text-[10px] text-ink-muted">
+            <span>{fmtDay(c.serie[0].data)}</span>
+            <span>{fmtDay(c.serie[c.serie.length - 1].data)}</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Num({ label, valor, sub }: { label: string; valor: string; sub?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-xs text-ink-muted">{label}</dt>
+      <dd className="num text-xl font-semibold tracking-tight">{valor}</dd>
+      {sub && <dd className="truncate text-[11px] text-ink-muted">{sub}</dd>}
     </div>
   );
 }
@@ -281,7 +379,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
   const onFile = (f?: File | null) => f && cruzar.mutate(f);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -313,7 +411,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
         <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={(e) => onFile(e.target.files?.[0])} />
       </div>
 
-      <div className="grid gap-2">
+      <div className="flex min-w-0 flex-col gap-2">
         <Acao icon={<FolderInput className="h-4 w-4" />} title="Importar acervo local" desc="Pasta de gravações + relatórios configurados no .env" onClick={() => importar.mutate()} loading={importar.isPending} />
         <Acao icon={<Upload className="h-4 w-4" />} title="Processar pendentes" desc={`${fmtInt(pendentes)} ligações pendentes ou com erro`} onClick={() => processar.mutate()} loading={processar.isPending} />
         <Acao icon={<CloudDownload className="h-4 w-4" />} title="Buscar no Argus (15 min)" desc="Puxa as ligações mais recentes agora" onClick={() => recentes.mutate()} loading={recentes.isPending} />
@@ -338,7 +436,7 @@ function Acao({ icon, title, desc, onClick, loading }: { icon: ReactNode; title:
     <button
       onClick={onClick}
       disabled={loading}
-      className="flex items-center gap-3 rounded-2xl border border-line p-3 text-left transition hover:border-ink/20 hover:bg-raised/50 active:scale-[.99] disabled:opacity-60"
+      className="flex w-full min-w-0 items-center gap-3 rounded-2xl border border-line p-3 text-left transition hover:border-ink/20 hover:bg-raised/50 active:scale-[.99] disabled:opacity-60"
     >
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-raised text-ink-2">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}</span>
       <span className="min-w-0">

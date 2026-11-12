@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Clock, Download, PhoneCall, PhoneOff, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { AlertTriangle, Download, Ear, PhoneCall, PhoneOff, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Suspense } from "react";
@@ -15,7 +15,7 @@ import { useFilters } from "@/components/filters/use-filters";
 import { Button, Card, Empty, Skeleton } from "@/components/ui/primitives";
 import { StatTile } from "@/components/ui/stat-tile";
 import { api, exportUrl } from "@/lib/api";
-import { fmtDur, fmtInt, fmtPct } from "@/lib/utils";
+import { fmtInt, fmtPct } from "@/lib/utils";
 
 export default function Page() {
   return (
@@ -134,12 +134,15 @@ function Dashboard() {
           delay={0.16}
         />
         <StatTile
-          label="Duração média"
-          value={s?.duracao_media}
-          format={fmtDur}
+          label="Revisão humana"
+          value={s?.revisao}
+          format={fmtInt}
           loading={loading}
-          icon={<Clock className="h-4 w-4" />}
-          hint={s ? `${s.duracao_total_horas.toLocaleString("pt-BR")} h de áudio` : undefined}
+          tone={s && s.revisao > 0 ? "warn" : undefined}
+          icon={<Ear className="h-4 w-4" />}
+          hint="IA sem segurança: alguém precisa ouvir"
+          onClick={() => setFilters({ revisao: f.revisao === "true" ? "" : "true" })}
+          active={f.revisao === "true"}
           delay={0.2}
         />
       </section>

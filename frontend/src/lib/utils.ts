@@ -46,6 +46,13 @@ export const fmtCompact = (n: number) =>
 export const fmtPct = (n?: number | null, d = 1) =>
   n == null ? "–" : `${n.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d })}%`;
 
+/** Valores em dólar: centavos quando pequeno (US$ 0,0046), 2 casas quando grande. */
+export const fmtUsd = (n?: number | null) => {
+  if (n == null) return "–";
+  const d = n !== 0 && Math.abs(n) < 0.1 ? 4 : 2;
+  return `US$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+};
+
 export const fmtDur = (s?: number | null) => {
   if (s == null || Number.isNaN(s)) return "–";
   const m = Math.floor(s / 60);

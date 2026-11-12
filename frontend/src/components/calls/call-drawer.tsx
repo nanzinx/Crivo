@@ -8,6 +8,7 @@ import {
   Bot,
   ChevronDown,
   Copy,
+  Ear,
   Headphones,
   Pause,
   Play,
@@ -21,7 +22,7 @@ import { toast } from "sonner";
 import { usePlayer } from "@/components/player/player-context";
 import { Button, CategoryBadge, Meter, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, type Call } from "@/lib/api";
-import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone } from "@/lib/utils";
+import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone, fmtUsd } from "@/lib/utils";
 
 export function PlayButton({ call, queue, size = "md" }: { call: Call; queue?: Call[]; size?: "sm" | "md" }) {
   const p = usePlayer();
@@ -182,6 +183,16 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </p>
             )}
 
+            {c.precisa_revisao && (
+              <p className="-mt-2 flex items-start gap-2 rounded-xl bg-warn/15 p-3 text-xs text-ink">
+                <Ear className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  <b className="font-semibold">Precisa de revisão humana:</b> {c.revisao_motivo} Enquanto ninguém ouvir, esta ligação
+                  não conta como divergência do operador.
+                </span>
+              </p>
+            )}
+
             {c.erro && (
               <p className="flex items-start gap-2 rounded-xl bg-critical/[.06] p-3 text-xs">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-critical" />
@@ -277,7 +288,9 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
                       ["Campanha", c.id_campanha],
                       ["Lead", c.nr_lead],
                       ["Tabulação normalizada", c.tabulacao_normalizada ? catLabel(c.tabulacao_normalizada) : null],
-                      ["Motor", c.motor],
+                      ["Analisada por", c.motor === "local" ? "Análise local (sem IA)" : c.motor === "openai" ? "IA" : c.motor],
+                      ["Fala detectada", c.fala_segundos != null ? `${c.fala_segundos.toLocaleString("pt-BR")}s` : null],
+                      ["Custo de IA", c.custo_usd ? fmtUsd(c.custo_usd) : c.motor === "local" ? "US$ 0 (sem IA)" : null],
                       ["Origem", c.origem],
                     ].map(([k, v]) => (
                       <div key={k as string} className="min-w-0">

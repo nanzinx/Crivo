@@ -16,12 +16,13 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-25%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-50%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
 <a href="#-como-funciona">Como funciona</a> ·
 <a href="#%EF%B8%8F-configuração">Configuração</a> ·
+<a href="#-custo-de-ia">Custo de IA</a> ·
 <a href="#-api">API</a> ·
 <a href="#%EF%B8%8F-roadmap">Roadmap</a>
 
@@ -80,6 +81,20 @@ Funciona do celular ao monitor ultrawide. Tema claro, escuro ou do sistema. Pale
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 👂 Sem segurança, não acusa
+Se a IA não entende o áudio ou tem confiança baixa, a ligação **não vira divergência**: vai para a fila de *revisão humana*, com o motivo escrito. O mesmo vale quando o operador tabulou muda/caixa postal mas o áudio tem fala dos dois lados.
+
+</td>
+<td valign="top">
+
+### 💸 Custo sob controle
+Ligações sem nenhuma fala são resolvidas **sem IA**. Cada chamada paga é registrada, e a tela de Saúde mostra o gasto do dia e do mês, o custo médio por ligação e um **teto diário** configurável.
+
+</td>
+</tr>
 </table>
 
 <div align="center">
@@ -88,7 +103,7 @@ Funciona do celular ao monitor ultrawide. Tema claro, escuro ou do sistema. Pale
 <img src="docs/img/ligacao-detalhe.png" alt="Detalhe de uma ligação divergente" width="49%" />
 <img src="docs/img/visao-geral-escuro.png" alt="Tema escuro" width="49%" />
 <br/>
-<img src="docs/img/saude.png" alt="Saúde do sistema" width="74%" />
+<img src="docs/img/saude-custo.png" alt="Saúde do sistema e custo de IA" width="74%" />
 <img src="docs/img/celular.png" alt="Versão para celular" width="23%" />
 </div>
 
@@ -129,12 +144,19 @@ flowchart LR
 ```
 
 1. **Ingestão.** A ligação chega pelo webhook de tabulação do Argus (tempo real). O polling a cada 5 min cobre webhooks perdidos, o backfill recupera períodos e a importação local lê o acervo de gravações.
-2. **Qualificação.** O áudio é baixado, transcrito pelo Whisper e classificado pelo GPT na [taxonomia oficial](#-taxonomia).
+2. **Triagem local (sem custo).** Antes de qualquer IA, o Crivo mede quanto de fala existe no áudio e, em gravações estéreo, de que lado.
+   - Sem nenhuma fala: a ligação é "Mudo total" e não vai para a IA.
+   - Na dúvida (ruído, voz baixa, tom de chamada), a ligação **sempre** segue para a IA.
+3. **Qualificação.** O áudio é transcrito e classificado pelo GPT na [taxonomia oficial](#-taxonomia).
    - Se a IA falhar, a ligação fica com **erro** e volta para a fila; o sistema nunca inventa uma categoria.
-   - A transcrição já obtida é preservada.
-3. **Cruzamento.** O relatório detalhado da discadora traz operador, tronco, sinalização SIP e tabulação. O Crivo compara a tabulação do operador com a classificação da IA e marca as divergências.
-4. **Identidade.** Se alguém nega ser o titular mas o mesmo telefone e nome já se confirmaram antes, a ligação vira *"É o cliente (identificou-se em outras ligações)"*.
-5. **Monitoramento.** Cada etapa registra sucesso ou falha. O painel de saúde transforma isso em alertas.
+   - A transcrição já obtida é preservada, e reanalisar uma ligação não paga a transcrição de novo.
+   - Se o áudio for ruim, a IA pode responder "Indeterminado" em vez de chutar.
+4. **Cruzamento.** O relatório detalhado da discadora traz operador, tronco, sinalização SIP e tabulação. O Crivo compara a tabulação do operador com a classificação da IA e chega a um de três resultados:
+   - **coerente**;
+   - **divergente**, só quando a IA tem segurança (confiança a partir de `CONFIANCA_MINIMA_DIVERGENCIA`);
+   - **revisão humana**, quando a IA não teve segurança ou o áudio contradiz a tabulação.
+5. **Identidade.** Se alguém nega ser o titular mas o mesmo telefone e nome já se confirmaram antes, a ligação vira *"É o cliente (identificou-se em outras ligações)"*.
+6. **Monitoramento.** Cada etapa registra sucesso ou falha. O painel de saúde transforma isso em alertas.
 
 ---
 
@@ -192,7 +214,11 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `ARGUS_AUDIO_CHANNELS` | `1` mono · `2` estéreo · `3` pontas A/B separadas | `1` |
 | `ARGUS_WEBHOOK_SECRET` | Segredo do webhook (`X-Webhook-Secret` ou `?secret=`) | — |
 | `OPENAI_API_KEY` | Liga a transcrição e a classificação por IA | — |
-| `OPENAI_MODEL` / `OPENAI_WHISPER_MODEL` | Modelos usados | `gpt-4o-mini` / `whisper-1` |
+| `OPENAI_MODEL` / `OPENAI_WHISPER_MODEL` | Modelos de classificação e de transcrição | `gpt-4o-mini` / `gpt-4o-mini-transcribe` |
+| `IA_TETO_DIARIO_USD` | Teto de gasto por dia (0 = sem teto) | `0` |
+| `IA_DIARIZAR` | A IA também separa a conversa por falante (mais caro) | `false` |
+| `VAD_ATIVO` | Resolver ligações sem fala localmente, sem IA | `true` |
+| `CONFIANCA_MINIMA_DIVERGENCIA` | Abaixo disso, vai para revisão humana em vez de divergência | `0.6` |
 | `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
 | `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
 | `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
@@ -216,6 +242,43 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | **Recuperar período** | Tela *Saúde do sistema* → *Recuperar período*, ou `POST /api/v1/sync/argus?data_inicio=…&data_fim=…` (janelas de 7 dias). |
 | **Acervo local** | Grave em `RECORDINGS_DIR` arquivos no padrão `YYYY-MM-DD_HHMMSS_nr{lead}_id{idLigacao}_{telefone}_{nome}.mp3` e clique em *Importar acervo local*. |
 | **Relatório da discadora** | Arraste o CSV em *Saúde do sistema* → *Cruzar relatório da discadora*. O arquivo é lido **pelo nome das colunas**, em UTF-8 ou Windows-1252. |
+
+---
+
+## 💸 Custo de IA
+
+Cerca de 90% do custo é a **transcrição**, cobrada por minuto de áudio; a classificação é a parte barata. O Crivo audita **100% das ligações** e reduz o gasto assim:
+
+| Medida | Efeito | Risco para a auditoria |
+|---|---|---|
+| Ligação sem nenhuma fala resolvida localmente | Não paga transcrição nem classificação | Nenhum, se validado (script abaixo) |
+| Resposta enxuta da IA (não repete a transcrição) | Resposta ~5× menor | Nenhum |
+| Reaproveitar a transcrição ao reanalisar | Não paga duas vezes | Nenhum |
+| `gpt-4o-mini-transcribe` no lugar do `whisper-1` | ~50% do custo de transcrição | Precisa ser validado (script abaixo) |
+| Teto diário (`IA_TETO_DIARIO_USD`) | Gasto previsível | As ligações acima do teto esperam o dia seguinte |
+
+Os valores exibidos são **estimativas** pelo preço de tabela em dólar ([`backend/app/services/custos.py`](backend/app/services/custos.py)). Preços mudam: confira a página do provedor e, se preciso, ajuste `PRECO_TRANSCRICAO_MINUTO`, `PRECO_ENTRADA_1M` e `PRECO_SAIDA_1M` no `.env`.
+
+### Valide antes de confiar
+
+Os dois scripts usam como gabarito as ligações já classificadas (por exemplo, as do CSV de escuta manual) que tenham o áudio no disco.
+
+```bash
+cd backend
+python -m scripts.validar_vad
+```
+
+Gratuito. Mostra quantas ligações mudas seriam resolvidas sem IA e, principalmente, se alguma ligação **com conversa** seria descartada como muda. O esperado é zero; se houver, desligue com `VAD_ATIVO=false` ou ajuste `VAD_FALA_MINIMA_SEGUNDOS`.
+
+```bash
+cd backend
+python -m scripts.comparar_transcricao --n 50 --modelos whisper-1,gpt-4o-mini-transcribe
+```
+
+**Custa dinheiro** (algo na casa de US$ 1 para 50 ligações e dois modelos). Compara os modelos de transcrição pelo que importa: a categoria final bate com a dos auditores? Troque o modelo só se o acerto ficar igual ou melhor.
+
+> [!NOTE]
+> Com `IA_DIARIZAR=false` (padrão), a transcrição aparece como texto corrido, sem os balões por falante. Os balões voltam com `IA_DIARIZAR=true`, pagando uma resposta maior da IA. A separação real por falante, a partir do áudio estéreo, está no roadmap.
 
 ---
 
@@ -243,7 +306,7 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `POST` | `/api/v1/sync/process` | Envia pendentes e com erro para a fila |
 | `POST` | `/api/v1/sync/reprocess/{id}` | Reanalisa uma ligação |
 
-**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `status`, `q`.
+**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `revisao`, `status`, `q`.
 
 </details>
 
@@ -258,7 +321,7 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | 🟢 **Sem interesse** | Cliente revoltado · Cliente calmo · Já possui / sem margem |
 | 🟡 **Ligação muda** | Atendente solitário · Cliente solitário · Falha de comunicação · Mudo total |
 | 🩷 **Caixa postal** | URA da operadora · Pós-bip · Fax/modem · Número inexistente |
-| ⚪ **Indeterminado** | Sem dados suficientes |
+| ⚪ **Indeterminado** | Sem dados suficientes · Áudio inaudível |
 
 Fonte única: [`backend/app/taxonomy.py`](backend/app/taxonomy.py).
 
@@ -271,11 +334,11 @@ crivo/
 ├── backend/
 │   ├── app/
 │   │   ├── api/            # rotas: calls, saude, sync, webhooks
-│   │   ├── services/       # argus_client, ai_qualifier, pipeline, local_ingestor, sincronizador, status
+│   │   ├── services/       # argus_client, ai_qualifier, audio_analyzer, custos, pipeline, local_ingestor, …
 │   │   ├── models.py       # Call, ContactIdentity, SystemStatus
 │   │   ├── taxonomy.py     # categorias oficiais
 │   │   └── worker.py       # fila em thread (trocar por RQ/Celery ao escalar)
-│   ├── scripts/seed_demo.py
+│   ├── scripts/            # seed_demo, validar_vad, comparar_transcricao
 │   └── tests/
 ├── frontend/
 │   └── src/
@@ -306,6 +369,15 @@ cd frontend && npm run typecheck && npm run build
   - O polling registra as falhas, e foi criado o painel de saúde.
   - As métricas usam os mesmos filtros e as bases certas.
   - Novo frontend.
+- [x] **Custo de IA, etapa 1.**
+  - Medição de custo por ligação, painel e teto diário.
+  - Resposta enxuta da IA e modelo de transcrição mais barato (com script de validação).
+  - Ligações sem fala resolvidas sem IA; aviso de "tabulou muda, mas tem conversa".
+  - Sem segurança, não acusa: indeterminado e baixa confiança vão para revisão humana.
+- [ ] **Custo de IA, etapa 2.**
+  - Cortar silêncio e espera antes de transcrever.
+  - Separação por falante a partir do áudio estéreo (`ARGUS_AUDIO_CHANNELS=3`), sem IA.
+  - Avaliar transcrição própria (faster-whisper) ou provedor mais barato.
 - [ ] **Semana 2: modelo de tabulação.**
   - Tabela de equivalência por ID de tabulação do Argus, editável na tela.
   - Taxonomia v2: desligou na abertura, pediu para não ligar (LGPD), ligação caiu, já é cliente.

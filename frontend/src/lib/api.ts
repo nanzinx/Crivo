@@ -11,6 +11,7 @@ export type Filters = {
   tipo_discagem?: string;
   desligado_por?: string;
   divergencia?: string; // "true" | "false"
+  revisao?: string; // "true" | "false"
   status?: string;
   q?: string;
 };
@@ -52,6 +53,10 @@ export type Call = {
   conflito_identidade?: boolean;
   divergencia_tabulacao?: boolean;
   divergencia_detalhe?: string | null;
+  precisa_revisao?: boolean;
+  revisao_motivo?: string | null;
+  fala_segundos?: number | null;
+  custo_usd?: number;
   ligacao_referencia_id?: number | null;
   tem_audio?: boolean;
   erro?: string | null;
@@ -80,6 +85,9 @@ export type Summary = {
   discagens: Dist[];
   troncos: (Dist & { tronco: string })[];
   divergencias: { total: number; comparaveis: number; taxa: number };
+  revisao: number;
+  sem_ia: number;
+  custo_usd: number;
   matriz_contraste: { tabulacao_operador: string; esperada: string; total: number; categorias: Record<string, number> }[];
   ranking_operadores: { operador: string; total: number; qualificadas: number; divergencias: number; taxa_divergencia: number }[];
   categorias: {
@@ -115,6 +123,22 @@ export type Evento = {
   ultima_falha_em: string | null;
 };
 
+export type Custos = {
+  hoje_usd: number;
+  mes_usd: number;
+  ligacoes_com_ia_mes: number;
+  custo_medio_usd: number;
+  minutos_transcritos_mes: number;
+  resolvidas_sem_ia_mes: number;
+  teto_diario_usd: number;
+  teto_pct: number | null;
+  modelo_transcricao: string;
+  modelo_classificacao: string;
+  diarizacao: boolean;
+  modelos_sem_preco: string[];
+  serie: { data: string; usd: number }[];
+};
+
 export type Saude = {
   gerado_em: string;
   integracoes: {
@@ -127,6 +151,8 @@ export type Saude = {
   ultima_ligacao_em: string | null;
   eventos: Record<string, Evento>;
   erros_recentes: { id: number; id_ligacao: number | null; data_ligacao: string | null; erro: string | null; operador_nome: string | null }[];
+  custos: Custos;
+  revisao_pendente: number;
   alertas: { nivel: "critico" | "atencao"; titulo: string; mensagem: string }[];
 };
 
