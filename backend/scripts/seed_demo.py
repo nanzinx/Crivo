@@ -32,7 +32,7 @@ CENARIOS = [
       ("ATENDENTE", "Ficaria em torno de 280 reais, reduzindo a taxa atual.")]),
     ("EM_NEGOCIACAO", "MIGRACAO_WHATSAPP", 4, "EM NEGOCIAÇÃO",
      [("ATENDENTE", "Posso te enviar a simulação?"), ("CLIENTE", "Manda pelo WhatsApp que eu vejo com calma.")]),
-    ("EM_NEGOCIACAO", "AGENDAMENTO_RETORNO", 3, "EM NEGOCIAÇÃO",
+    ("EM_NEGOCIACAO", "AGENDAMENTO_RETORNO", 3, "RETORNO AGENDADO",
      [("CLIENTE", "Agora não posso, me liga depois das seis?"), ("ATENDENTE", "Combinado, retorno às 18h.")]),
     ("NAO_E_O_CLIENTE", "ENGANO_DIRETO", 10, "NÃO É O CLIENTE",
      [("ATENDENTE", "Falo com o senhor {nome}?"), ("CLIENTE", "Não conheço ninguém com esse nome, é engano.")]),
@@ -42,8 +42,14 @@ CENARIOS = [
      [("CLIENTE", "Esse número é novo, comprei o chip mês passado.")]),
     ("SEM_INTERESSE", "CLIENTE_CALMO", 12, "CLIENTE NÃO TEM INTERESSE",
      [("ATENDENTE", "Temos uma condição especial de crédito."), ("CLIENTE", "Não tenho interesse, obrigado.")]),
-    ("SEM_INTERESSE", "CLIENTE_REVOLTADO", 4, "CLIENTE NÃO TEM INTERESSE",
+    ("SEM_INTERESSE", "CLIENTE_REVOLTADO", 4, "NÃO LIGAR / BLOQUEIO",
      [("CLIENTE", "Pare de ligar! Todo dia isso, que saco.")]),
+    ("SEM_INTERESSE", "JA_E_CLIENTE", 2, "CLIENTE NÃO TEM INTERESSE",
+     [("CLIENTE", "Eu já sou cliente de vocês, já fiz contrato ano passado.")]),
+    ("LIGACAO_MUDA", "DESLIGOU_NA_ABERTURA", 4, "LIGAÇÃO MUDA / CAIXA POSTAL",
+     [("CLIENTE", "Alô?"), ("ATENDENTE", "Bom dia, aqui é da…")]),
+    ("SEM_INTERESSE", "CLIENTE_CALMO", 2, "AGENDAMENTO AUTOMÁTICO DISCADOR",
+     [("CLIENTE", "Não tenho interesse, obrigado.")]),
     ("SEM_INTERESSE", "JA_POSSUI", 3, "CLIENTE NÃO TEM INTERESSE",
      [("CLIENTE", "Já fiz portabilidade semana passada, não tenho margem.")]),
     ("LIGACAO_MUDA", "ATENDENTE_SOLITARIO", 14, "LIGAÇÃO MUDA / CAIXA POSTAL",
@@ -85,6 +91,8 @@ def gerar(n: int, seed: int = 42) -> int:
             if tronco.startswith("TELECOM") and rng.random() < 0.5:  # tronco "ruim": mais ligações mudas
                 cat, sub, tab_ok, falas = "LIGACAO_MUDA", "MUDO_TOTAL", "LIGAÇÃO MUDA / CAIXA POSTAL", []
             tab = rng.choice(TABULACOES_ERRADAS) if rng.random() < erro_op[op] else tab_ok
+            if tab_ok == "NÃO LIGAR / BLOQUEIO" and rng.random() < 0.5:
+                tab = "CLIENTE NÃO TEM INTERESSE"  # pedido de não ligar sem registro (LGPD)
             turnos = [{"speaker": s, "text": t.format(nome=nome), "sentiment":
                        "revoltado" if sub == "CLIENTE_REVOLTADO" and s == "CLIENTE" else "neutro"} for s, t in falas]
             dur = {"LIGACAO_MUDA": rng.uniform(3, 15), "CAIXA_POSTAL": rng.uniform(8, 25)}.get(cat, rng.uniform(20, 240))
@@ -132,10 +140,13 @@ def gerar(n: int, seed: int = 42) -> int:
                     c.metricas_acusticas = {**c.metricas_acusticas, "transcricao_por_canal": True}
                 c.sentimento_cliente = "revoltado" if sub == "CLIENTE_REVOLTADO" else "calmo"
                 c.qualificado_em = c.data_ligacao + timedelta(minutes=2)
-                pipeline.calcular_divergencia(c)
+                c.pediu_nao_ligar = any("pare de ligar" in t["text"].lower() for t in turnos)
+                c.taxonomia_versao = 2
             elif st == "error":
                 c.erro = "classificação: 429 rate limit (demonstração)"
             db.add(c)
+            db.flush()
+            pipeline.atualizar_divergencia(db, c)  # registra a tabulação no catálogo e compara
             if st == "done" and c.motor == "openai":  # custo simulado: transcrição + classificação
                 db.flush()
                 enviado = round(c.duracao_segundos * rng.uniform(0.68, 0.9), 1)  # corte de silêncio simulado

@@ -17,10 +17,11 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { usePlayer } from "@/components/player/player-context";
-import { Button, CategoryBadge, Meter, Pill, Skeleton } from "@/components/ui/primitives";
+import { Button, CategoryBadge, GravidadePill, Meter, NaoLigarPill, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, type Call } from "@/lib/api";
 import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone, fmtUsd } from "@/lib/utils";
 
@@ -176,11 +177,29 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </div>
             </section>
             {c.divergencia_tabulacao && (
-              <p className="-mt-2 flex items-start gap-2 rounded-xl bg-critical/[.06] p-3 text-xs text-ink">
+              <div className="-mt-2 flex items-start gap-2 rounded-xl bg-critical/[.06] p-3 text-xs text-ink">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-critical" />
-                <span>
-                  <b className="font-semibold">Divergência:</b> {c.divergencia_detalhe}
-                </span>
+                <div className="space-y-1.5">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <b className="font-semibold">Divergência</b> <GravidadePill g={c.divergencia_gravidade} />
+                  </p>
+                  <p>{c.divergencia_detalhe}</p>
+                  {c.tabulacao_confirmada === false && (
+                    <p className="text-ink-muted">
+                      O significado desta tabulação ainda é só uma sugestão do sistema.{" "}
+                      <Link href="/tabulacoes" className="font-medium text-brand-ink underline">
+                        Confirmar em Modelo de tabulação
+                      </Link>
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {c.pediu_nao_ligar && (
+              <p className="-mt-2 flex items-start gap-2 rounded-xl bg-brand-soft p-3 text-xs text-ink">
+                <NaoLigarPill className="shrink-0 bg-surface" />
+                <span>Quem atendeu pediu para não receber mais ligações. Confira se o número saiu do mailing.</span>
               </p>
             )}
 

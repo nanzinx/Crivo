@@ -112,7 +112,7 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
             transition={{ duration: 0.25 }}
             className="overflow-hidden"
           >
-            <div className="card grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 2xl:grid-cols-10">
+            <div className="card grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
               <Select label="Categoria IA" value={f.categoria ?? ""} onChange={(e) => setFilters({ categoria: e.target.value, subcategoria: "" })}>
                 <option value="">Todas</option>
                 {CATEGORIAS.map((c) => (
@@ -173,6 +173,17 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
                 <option value="">Todas</option>
                 <option value="true">Divergentes</option>
                 <option value="false">Coerentes</option>
+              </Select>
+              <Select label="Gravidade" value={f.gravidade ?? ""} onChange={(e) => setFilters({ gravidade: e.target.value })}>
+                <option value="">Todas</option>
+                <option value="alta">Alta</option>
+                <option value="media">Média</option>
+                <option value="baixa">Baixa</option>
+              </Select>
+              <Select label="Pediu p/ não ligar" value={f.nao_ligar ?? ""} onChange={(e) => setFilters({ nao_ligar: e.target.value })}>
+                <option value="">Todas</option>
+                <option value="true">Sim (LGPD)</option>
+                <option value="false">Não</option>
               </Select>
               <Select label="Revisão humana" value={f.revisao ?? ""} onChange={(e) => setFilters({ revisao: e.target.value })}>
                 <option value="">Todas</option>

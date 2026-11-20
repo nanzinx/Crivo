@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, LayoutDashboard, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
+import { Activity, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Visão geral", short: "Visão", icon: LayoutDashboard },
   { href: "/ligacoes", label: "Ligações", short: "Ligações", icon: ListMusic },
+  { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks },
   { href: "/saude", label: "Saúde do sistema", short: "Saúde", icon: Activity },
 ];
 
@@ -103,6 +104,8 @@ function LiveBadge() {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { current } = usePlayer();
+  const { data: saude } = useQuery({ queryKey: ["saude"], queryFn: api.saude, refetchInterval: 30_000 });
+  const pendentes = saude?.tabulacoes_pendentes ?? 0;
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
@@ -131,6 +134,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
               <Icon className="relative h-[18px] w-[18px]" />
               <span className="relative">{label}</span>
+              {href === "/tabulacoes" && pendentes > 0 && (
+                <span className="relative ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-warn px-1.5 text-[10px] font-bold text-[#0b0b0b]" title={`${pendentes} tabulação(ões) para confirmar`}>
+                  {pendentes}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
@@ -170,7 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <PlayerBar />
 
       {/* Bottom nav (mobile/tablet) */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         {NAV.map(({ href, short, icon: Icon }) => (
           <Link
             key={href}
@@ -180,7 +188,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               isActive(href) && "text-ink",
             )}
           >
-            <Icon className={cn("h-5 w-5", isActive(href) && "text-brand")} />
+            <span className="relative">
+              <Icon className={cn("h-5 w-5", isActive(href) && "text-brand")} />
+              {href === "/tabulacoes" && pendentes > 0 && <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-warn" />}
+            </span>
             {short}
           </Link>
         ))}

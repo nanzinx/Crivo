@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import type { HourRow, Summary } from "@/lib/api";
 import { CATEGORIAS, catColor, catLabel, cn, fmtInt, fmtPct } from "@/lib/utils";
@@ -98,12 +99,11 @@ function Row({ children }: { children: React.ReactNode }) {
 export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contraste"]; onPick?: (tab: string) => void }) {
   // "Pendente" (ainda sem análise da IA) não entra na comparação; aparece só no total da linha
   const cats: string[] = CATEGORIAS.filter((c) => data.some((r) => r.categorias[c]));
-  const diverge = (esperada: string, cat: string) => {
-    // Indeterminado nunca acusa o operador: vai para revisão humana
-    if (cat === "PENDENTE" || cat === "INDETERMINADO" || ["OUTRO"].includes(esperada)) return false;
-    if (esperada === "MUDA_OU_CAIXA") return !["LIGACAO_MUDA", "CAIXA_POSTAL"].includes(cat);
-    if (esperada === "NAO_TABULADO") return ["EM_NEGOCIACAO", "SEM_INTERESSE", "NAO_E_O_CLIENTE"].includes(cat);
-    return esperada !== cat;
+  // Mesma regra do backend (modelo de tabulação). Indeterminado nunca acusa o operador: vai para revisão humana.
+  const diverge = (r: Summary["matriz_contraste"][number], cat: string) => {
+    if (cat === "PENDENTE" || cat === "INDETERMINADO" || r.tipo === "ignorar") return false;
+    if (r.tipo === "nao_tabulado") return ["EM_NEGOCIACAO", "SEM_INTERESSE", "NAO_E_O_CLIENTE"].includes(cat);
+    return !r.esperadas.includes(cat);
   };
 
   return (
@@ -132,16 +132,17 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
                   <td className="sticky left-0 z-10 max-w-[150px] bg-surface pr-3 sm:max-w-[240px]">
                     <button
                       onClick={() => onPick?.(r.tabulacao_operador)}
-                      className="block w-full truncate py-1 text-left text-ink hover:underline"
-                      title={r.tabulacao_operador}
+                      className="flex w-full items-center gap-1.5 py-1 text-left text-ink hover:underline"
+                      title={r.confirmada ? r.tabulacao_operador : `${r.tabulacao_operador} (significado apenas sugerido)`}
                     >
-                      {r.tabulacao_operador}
+                      <span className="truncate">{r.tabulacao_operador}</span>
+                      {!r.confirmada && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-label="significado sugerido" />}
                     </button>
                   </td>
                   {cats.map((c) => {
                     const v = r.categorias[c] || 0;
                     const share = qualificadas && c !== "PENDENTE" ? v / qualificadas : 0;
-                    const div = v > 0 && diverge(r.esperada, c);
+                    const div = v > 0 && diverge(r, c);
                     return (
                       <td
                         key={c}
@@ -169,6 +170,15 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
         <AlertTriangle className="h-3.5 w-3.5 text-critical" />
         Contorno vermelho = a IA discorda do que o operador tabulou (casos com pouca confiança vão para revisão, não entram aqui). Intensidade = participação na linha.
       </p>
+      {data.some((r) => !r.confirmada) && (
+        <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+          <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+          Tabulação com significado apenas sugerido.{" "}
+          <Link href="/tabulacoes" className="font-medium text-brand-ink hover:underline">
+            Confirmar em Modelo de tabulação
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

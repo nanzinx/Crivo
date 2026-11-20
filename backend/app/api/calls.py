@@ -9,8 +9,8 @@ from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Call
-from ..services.pipeline import normalizar_tabulacao
+from ..models import Call, Tabulacao
+from ..services import tabulacoes
 from ..taxonomy import CATEGORIES, label_cat, label_sub
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
@@ -33,6 +33,8 @@ def apply_filters(
     desligado_por: str | None = None,
     divergencia: bool | None = None,
     revisao: bool | None = None,
+    gravidade: str | None = None,
+    nao_ligar: bool | None = None,
 ):
     if data_inicio:
         stmt = stmt.where(Call.data_ligacao >= datetime.combine(data_inicio, time.min))
@@ -66,6 +68,10 @@ def apply_filters(
         stmt = stmt.where(Call.desligado_por == desligado_por)
     if divergencia is not None:
         stmt = stmt.where(Call.divergencia_tabulacao.is_(divergencia))
+    if gravidade:
+        stmt = stmt.where(Call.divergencia_gravidade == gravidade)
+    if nao_ligar is not None:
+        stmt = stmt.where(Call.pediu_nao_ligar.is_(True) if nao_ligar else Call.pediu_nao_ligar.is_not(True))
     if revisao is not None:
         stmt = stmt.where(Call.precisa_revisao.is_(True) if revisao else Call.precisa_revisao.is_not(True))
     if q:
@@ -82,7 +88,11 @@ def apply_filters(
     return stmt
 
 
-def serialize(c: Call, full: bool = False) -> dict:
+def _confirmadas(db: Session) -> set[int]:
+    return set(db.scalars(select(Tabulacao.id).where(Tabulacao.confirmada.is_(True))))
+
+
+def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None) -> dict:
     d = {
         "id": c.id,
         "id_ligacao": c.id_ligacao,
@@ -119,6 +129,10 @@ def serialize(c: Call, full: bool = False) -> dict:
         "conflito_identidade": c.conflito_identidade,
         "divergencia_tabulacao": bool(c.divergencia_tabulacao),
         "divergencia_detalhe": c.divergencia_detalhe,
+        "divergencia_gravidade": c.divergencia_gravidade,
+        "pediu_nao_ligar": bool(c.pediu_nao_ligar),
+        "tabulacao_id": c.tabulacao_id,
+        "tabulacao_confirmada": (c.tabulacao_id in confirmadas) if confirmadas is not None and c.tabulacao_id else None,
         "precisa_revisao": bool(c.precisa_revisao),
         "revisao_motivo": c.revisao_motivo,
         "fala_segundos": c.fala_segundos,
@@ -155,13 +169,16 @@ class Filtros:
         desligado_por: str | None = None,
         divergencia: bool | None = None,
         revisao: bool | None = None,
+        gravidade: str | None = None,
+        nao_ligar: bool | None = None,
         q: str | None = None,
         status: str | None = None,
     ):
         self.kw = dict(data_inicio=data_inicio, data_fim=data_fim, categoria=categoria, subcategoria=subcategoria,
                        telefone=telefone, operador=operador, campanha=campanha, q=q, status=status, tronco=tronco,
                        tipo_agente=tipo_agente, tipo_discagem=tipo_discagem, desligado_por=desligado_por,
-                       divergencia=divergencia, revisao=revisao)
+                       divergencia=divergencia, revisao=revisao,
+                       gravidade=gravidade, nao_ligar=nao_ligar)
 
     def __call__(self, stmt, **override):
         return apply_filters(stmt, **{**self.kw, **override})
@@ -172,12 +189,17 @@ def list_calls(
     f: Filtros = Depends(),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
+    ordenar: str | None = Query(None, pattern="^(data|gravidade)$"),
     db: Session = Depends(get_db),
 ):
     base = f(select(Call))
     total = db.scalar(select(func.count()).select_from(base.subquery()))
-    rows = db.scalars(base.order_by(Call.data_ligacao.desc(), Call.id.desc()).offset((page - 1) * page_size).limit(page_size))
-    return {"total": total, "page": page, "page_size": page_size, "items": [serialize(c) for c in rows]}
+    ordem = [Call.data_ligacao.desc(), Call.id.desc()]
+    if ordenar == "gravidade":  # alta, média, baixa e depois o resto; dentro de cada uma, as mais recentes
+        ordem.insert(0, case({"alta": 0, "media": 1, "baixa": 2}, value=Call.divergencia_gravidade, else_=3))
+    rows = db.scalars(base.order_by(*ordem).offset((page - 1) * page_size).limit(page_size))
+    conf = _confirmadas(db)
+    return {"total": total, "page": page, "page_size": page_size, "items": [serialize(c, confirmadas=conf) for c in rows]}
 
 
 EXPORT_LIMITE = 50000
@@ -195,7 +217,7 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
     writer.writerow([
         "ID Ligação", "Data/Hora", "Telefone", "Cliente", "Operador", "Tipo Agente", "Origem Discagem", "Tronco",
         "Desligado Por", "Sinalização SIP", "Tabulação Operador", "Categoria IA", "Subcategoria IA", "Confiança",
-        "Divergência?", "Detalhe Divergência", "Revisar?", "Motivo da Revisão", "Duração (seg)", "Sentimento Cliente", "Status", "Resumo",
+        "Divergência?", "Gravidade", "Detalhe Divergência", "Pediu p/ não ligar?", "Revisar?", "Motivo da Revisão", "Duração (seg)", "Sentimento Cliente", "Status", "Resumo",
     ])
     for c in rows:
         writer.writerow([
@@ -214,7 +236,9 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
             label_sub(c.categoria, c.subcategoria) if c.categoria else "",
             f"{c.confianca:.2f}".replace(".", ",") if c.confianca is not None else "",
             "SIM" if c.divergencia_tabulacao else "NÃO",
+            {"alta": "Alta", "media": "Média", "baixa": "Baixa"}.get(c.divergencia_gravidade or "", ""),
             c.divergencia_detalhe or "",
+            "SIM" if c.pediu_nao_ligar else "NÃO",
             "SIM" if c.precisa_revisao else "NÃO",
             c.revisao_motivo or "",
             f"{c.duracao_segundos:.1f}".replace(".", ",") if c.duracao_segundos else "0",
@@ -235,7 +259,7 @@ def get_call(call_id: int, db: Session = Depends(get_db)):
     c = db.get(Call, call_id)
     if not c:
         raise HTTPException(404, "Ligação não encontrada")
-    out = serialize(c, full=True)
+    out = serialize(c, full=True, confirmadas=_confirmadas(db))
     if c.ligacao_referencia_id and (ref := db.get(Call, c.ligacao_referencia_id)):
         out["ligacao_referencia"] = serialize(ref)
     return out
@@ -324,10 +348,14 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
         .where(Call.tabulacao_operador.is_not(None))
         .group_by(Call.tabulacao_operador, Call.categoria)
     )).all()
+    regras = tabulacoes.regras_por_chave(db)
     matriz: dict[str, dict] = {}
     for tab_op, cat_ia, n in matriz_rows:
-        e = matriz.setdefault(tab_op, {"tabulacao_operador": tab_op, "esperada": normalizar_tabulacao(tab_op),
-                                       "total": 0, "categorias": {}})
+        if tab_op not in matriz:
+            regra = regras.get(tabulacoes.chave(tab_op)) or tabulacoes.sugerir(tab_op)
+            matriz[tab_op] = {"tabulacao_operador": tab_op, "esperada": regra.codigo, "esperadas": regra.categorias,
+                              "tipo": regra.tipo, "confirmada": regra.confirmada, "total": 0, "categorias": {}}
+        e = matriz[tab_op]
         e["total"] += n
         e["categorias"][cat_ia or "PENDENTE"] = n
 
@@ -358,7 +386,13 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
         "agentes": _distribuicao(db, f, Call.tipo_agente, "tipo"),
         "discagens": _distribuicao(db, f, Call.tipo_discagem, "tipo"),
         "troncos": _distribuicao(db, f, Call.tronco, "tronco"),
+        "nao_ligar": db.scalar(f(select(func.count(Call.id)).where(Call.pediu_nao_ligar.is_(True)))) or 0,
         "divergencias": {"total": total_div, "comparaveis": comparaveis,
+                         "por_gravidade": {g: n for g, n in (("alta", 0), ("media", 0), ("baixa", 0))}
+                         | dict(db.execute(f(select(Call.divergencia_gravidade, func.count())
+                                             .where(done, Call.divergencia_tabulacao.is_(True),
+                                                    Call.divergencia_gravidade.is_not(None))
+                                             .group_by(Call.divergencia_gravidade))).all()),
                          "taxa": round(100 * total_div / comparaveis, 1) if comparaveis else 0},
         "revisao": db.scalar(f(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True)))) or 0,
         "sem_ia": db.scalar(f(select(func.count(Call.id)).where(Call.motor == "local"))) or 0,

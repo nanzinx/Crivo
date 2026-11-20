@@ -25,6 +25,8 @@ class Call(Base):
     operador_id: Mapped[str | None] = mapped_column(String(64), index=True)
     operador_nome: Mapped[str | None] = mapped_column(String(255))
     tabulacao_operador: Mapped[str | None] = mapped_column(String(255), index=True)
+    id_tabulacao_argus: Mapped[int | None] = mapped_column(Integer, index=True)
+    tabulacao_id: Mapped[int | None] = mapped_column(ForeignKey("tabulacoes.id"), index=True)  # modelo de tabulação
 
     data_ligacao: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     duracao_segundos: Mapped[float | None] = mapped_column(Float)
@@ -48,6 +50,9 @@ class Call(Base):
     metricas_acusticas: Mapped[dict | None] = mapped_column(JSON)
     divergencia_tabulacao: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     divergencia_detalhe: Mapped[str | None] = mapped_column(Text)
+    divergencia_gravidade: Mapped[str | None] = mapped_column(String(10), index=True)  # alta | media | baixa
+    pediu_nao_ligar: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)  # LGPD
+    taxonomia_versao: Mapped[int | None] = mapped_column(Integer)
     tabulacao_normalizada: Mapped[str | None] = mapped_column(String(64), index=True)
     desligado_por: Mapped[str | None] = mapped_column(String(32), index=True)  # CLIENTE | OPERADOR | OUTRO
     desligamento_detalhe: Mapped[str | None] = mapped_column(String(255))
@@ -114,3 +119,25 @@ class IaUso(Base):
     tokens_entrada: Mapped[int] = mapped_column(Integer, default=0)
     tokens_saida: Mapped[int] = mapped_column(Integer, default=0)
     custo_usd: Mapped[float] = mapped_column(Float, default=0)
+
+
+class Tabulacao(Base):
+    """Modelo de tabulação: o que cada tabulação do Argus significa na taxonomia do Crivo.
+
+    Toda tabulação nova que aparece entra aqui com um significado SUGERIDO (pelo texto). A equipe
+    confirma ou corrige na tela "Modelo de tabulação"; a divergência passa a usar a regra confirmada.
+    """
+
+    __tablename__ = "tabulacoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chave: Mapped[str] = mapped_column(String(255), unique=True, index=True)  # texto normalizado
+    nome: Mapped[str] = mapped_column(String(255))  # texto como aparece no Argus
+    id_argus: Mapped[int | None] = mapped_column(Integer, index=True)
+    tipo: Mapped[str] = mapped_column(String(20), default="resultado")  # resultado | nao_tabulado | ignorar
+    categorias: Mapped[list | None] = mapped_column(JSON)  # categorias da IA aceitas como coerentes
+    subcategoria: Mapped[str | None] = mapped_column(String(60))  # opcional: exige também a subcategoria
+    nao_ligar: Mapped[bool] = mapped_column(Boolean, default=False)  # esta tabulação registra o pedido de não ligar
+    confirmada: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)

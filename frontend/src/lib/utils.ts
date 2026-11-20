@@ -24,7 +24,10 @@ export const CAT_LABEL: Record<string, string> = {
   MUDA_OU_CAIXA: "Muda ou caixa postal",
   NAO_TABULADO: "Não tabulado",
   OUTRO: "Outra tabulação",
+  VARIAS: "Várias categorias",
 };
+
+export const GRAV_LABEL: Record<string, string> = { alta: "Alta", media: "Média", baixa: "Baixa" };
 
 export const catColor = (c?: string | null) => (c && CAT_LABEL[c] ? `var(--cat-${c}, var(--series-neutral))` : "var(--series-neutral)");
 export const catLabel = (c?: string | null) => (c ? CAT_LABEL[c] ?? c : "Pendente");

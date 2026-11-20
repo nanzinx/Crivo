@@ -40,6 +40,7 @@ class RespostaIA(BaseModel):
     resumo: str = ""
     evidencia: str = ""
     sentimento_cliente: Optional[str] = None
+    pedido_nao_ligar: bool = False
 
 
 class RespostaIADiarizada(RespostaIA):
@@ -59,6 +60,7 @@ class Resultado(BaseModel):
     transcricao: str = ""
     turnos: List[Turno] = []
     sentimento_cliente: Optional[str] = None
+    pedido_nao_ligar: bool = False
     motor: str = "heuristica"
     uso: List[dict] = []  # chamadas pagas: {tipo, modelo, audio_segundos, tokens_entrada, tokens_saida}
     por_canal: bool = False  # transcrição feita um lado por canal (estéreo): `turnos` = falas agrupadas por lado
@@ -85,6 +87,14 @@ def heuristica(transcricao: str | None, duracao: float | None) -> Resultado:
 
     if words == 0:
         return r("LIGACAO_MUDA", "MUDO_TOTAL", 0.6, "Sem fala transcrita.")
+    res = _heuristica_categoria(t, words, duracao, r)
+    res.pedido_nao_ligar = bool(_has(t, [r"pare de ligar", r"para de ligar", r"nao (me )?liga(r)? mais",
+                                         r"nao me liga", r"tira(r)? (o )?(meu|esse|este) numero",
+                                         r"remove(r)? (o )?(meu|esse|este) numero", r"nao quero (mais )?receber"]))
+    return res
+
+
+def _heuristica_categoria(t: str, words: int, duracao: float | None, r) -> Resultado:
     if k := _has(t, [r"caixa postal", r"deixe (seu|sua) (recado|mensagem)", r"apos o sinal", r"apos o bip",
                      r"nao existe", r"fora de area", r"desligado ou", r"nao pode atender"]):
         sub = "NUMERO_INEXISTENTE" if k in ("nao existe",) else "URA_OPERADORA"
@@ -142,12 +152,15 @@ Diretrizes obrigatórias de classificação:
    - CLIENTE_REVOLTADO: Recusa grosseira, palavrões, gritos, agressividade.
    - CLIENTE_CALMO: Recusa educada, cortês ou neutra ("não tenho interesse, obrigado").
    - JA_POSSUI: Explica que já fez empréstimo/portabilidade ou não possui margem.
+   - JA_E_CLIENTE: Diz que já é cliente / já contratou com a própria empresa que está ligando.
 
 4. 'LIGACAO_MUDA': Sem diálogo recíproco.
    - ATENDENTE_SOLITARIO: O atendente fala ("alô, bom dia"), mas o outro lado fica mudo ou sem resposta.
    - CLIENTE_SOLITARIO: O cliente fala ("alô? quem fala?"), mas o atendente não responde.
    - FALHA_COMUNICACAO: Ambos tentam falar simultaneamente, mas não se ouvem ("alô? não escuto").
    - MUDO_TOTAL: Silêncio bilateral absoluto, sem falas inteligíveis.
+   - DESLIGOU_NA_ABERTURA: Uma pessoa atende e desliga logo na abertura, antes de qualquer conversa.
+   - LIGACAO_CAIU: A conversa começa, mas a ligação cai ou é interrompida antes de haver um resultado.
 
 5. 'CAIXA_POSTAL': Atendimento por voz não humana.
    - URA_OPERADORA: Mensagem gravada da operadora ("deixe seu recado", "número indisponível").
@@ -173,6 +186,9 @@ Instruções de saída:
 - `resumo`: Breve explicação de 1 a 2 frases fundamentando a escolha.
 - `evidencia`: Citação textual literal exata do trecho da fala que comprova a decisão (curta).
 - `sentimento_cliente`: Sentimento geral ('calmo', 'revoltado', 'neutro' ou nulo se mudo/ura).
+- `pedido_nao_ligar`: true se quem atendeu PEDIU para não receber mais ligações / remover o número
+  ("pare de ligar", "tira meu número", "não me liga mais"). Vale em qualquer categoria. Recusa simples
+  ("não tenho interesse") não é pedido de não ligar.
 """
 
 _PROMPT_TURNOS = """- `turnos`: Lista de falas diarizadas com `speaker` ('ATENDENTE', 'CLIENTE' ou 'URA'), `text` e `sentiment` ('calmo', 'revoltado' ou 'neutro').
@@ -286,6 +302,7 @@ def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None
     out = Resultado(
         categoria=res.categoria, subcategoria=res.subcategoria, confianca=res.confianca, resumo=res.resumo,
         evidencia=res.evidencia, sentimento_cliente=res.sentimento_cliente, transcricao=texto,
+        pedido_nao_ligar=bool(getattr(res, "pedido_nao_ligar", False)),
         turnos=getattr(res, "turnos", None) or lados, motor="openai", uso=uso, por_canal=bool(lados),
     )
     if not valid(out.categoria, out.subcategoria):

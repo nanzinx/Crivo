@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Call, agora
-from . import pipeline
+from . import pipeline, tabulacoes
 
 FILE_RE = re.compile(
     r"^(?P<data>\d{4}-\d{2}-\d{2})_(?P<hora>\d{6})_nr(?P<nr>\d+)_id(?P<id>\d+)_(?P<tel>\d+)_(?P<nome>.*)\.(?:mp3|wav)$",
@@ -166,7 +166,7 @@ def import_legacy_csv(db: Session, path: str | None = None) -> dict:
             call.resumo = "Importado do relatório de escuta anterior."
             call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
             call.qualificado_em = agora()
-            pipeline.calcular_divergencia(call)
+            pipeline.atualizar_divergencia(db, call)
             mapped += 1
         enriched += 1
     db.commit()
@@ -185,6 +185,8 @@ _COLUNAS_CRUZAR: dict[str, tuple[list[str], int]] = {
     "telefone": (["telefone", "fone", "numero discado"], 12),
     "tempo_reacao": (["tempo de reacao", "tempo reacao", "reacao"], 14),
     "tabulacao": (["tabulacao", "tabulacao operador"], 19),
+    "cod_tabulacao": (["cod. tabulacao", "cod tabulacao", "codigo tabulacao", "codigo da tabulacao", "id tabulacao",
+                       "idtabulacao"], -1),
     "usuario": (["usuario", "operador", "agente", "nome usuario"], 20),
     "grupo": (["grupo origem", "grupo de origem", "grupo"], 22),
     "tronco": (["tronco", "rota"], 23),
@@ -213,7 +215,7 @@ def _resolver_colunas(header: list[str]) -> tuple[dict[str, int], list[str]]:
     por_posicao = []
     if len(idx) < 3:  # cabeçalho irreconhecível: usa o layout legado por posição (e avisa)
         for campo, (_, pos) in _COLUNAS_CRUZAR.items():
-            if campo not in idx and pos < len(header):
+            if campo not in idx and 0 <= pos < len(header):
                 idx[campo] = pos
                 por_posicao.append(campo)
     return idx, por_posicao
@@ -269,6 +271,7 @@ def import_cruzar_dados(db: Session, path: str | None = None, conteudo: bytes | 
     calls_by_id = {c.id_ligacao: c for c in db.scalars(select(Call).where(Call.id_ligacao.is_not(None)))}
 
     enriched = divergent = sem_match = 0
+    nao_ligar = tabulacoes.nao_ligar_ativo(db)
     for row in reader:
         if not any(x.strip() for x in row):
             continue
@@ -302,7 +305,10 @@ def import_cruzar_dados(db: Session, path: str | None = None, conteudo: bytes | 
         call.tipo_discagem = _tipo_discagem(call.grupo_origem or "", call.tronco or "", get(row, "tipo_ligacao")) \
             or call.tipo_discagem
 
-        pipeline.calcular_divergencia(call)  # mesma regra usada após a qualificação da IA
+        cod_tab = get(row, "cod_tabulacao")
+        if cod_tab.isdigit():
+            call.id_tabulacao_argus = int(cod_tab)
+        pipeline.atualizar_divergencia(db, call, nao_ligar)  # mesma regra usada após a qualificação da IA
         divergent += bool(call.divergencia_tabulacao)
         enriched += 1
 
@@ -358,7 +364,7 @@ def import_legacy_html(db: Session, path: str | None = None) -> dict:
             call.resumo = "Auditado da base de gravações."
             call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
             call.qualificado_em = agora()
-            pipeline.calcular_divergencia(call)
+            pipeline.atualizar_divergencia(db, call)
         enriched += 1
 
     db.commit()

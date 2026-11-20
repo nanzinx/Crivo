@@ -12,6 +12,8 @@ export type Filters = {
   desligado_por?: string;
   divergencia?: string; // "true" | "false"
   revisao?: string; // "true" | "false"
+  gravidade?: string; // alta | media | baixa
+  nao_ligar?: string; // "true" | "false"
   status?: string;
   q?: string;
 };
@@ -53,6 +55,10 @@ export type Call = {
   conflito_identidade?: boolean;
   divergencia_tabulacao?: boolean;
   divergencia_detalhe?: string | null;
+  divergencia_gravidade?: "alta" | "media" | "baixa" | null;
+  pediu_nao_ligar?: boolean;
+  tabulacao_id?: number | null;
+  tabulacao_confirmada?: boolean | null;
   precisa_revisao?: boolean;
   revisao_motivo?: string | null;
   fala_segundos?: number | null;
@@ -84,11 +90,20 @@ export type Summary = {
   agentes: Dist[];
   discagens: Dist[];
   troncos: (Dist & { tronco: string })[];
-  divergencias: { total: number; comparaveis: number; taxa: number };
+  divergencias: { total: number; comparaveis: number; taxa: number; por_gravidade: Record<"alta" | "media" | "baixa", number> };
+  nao_ligar: number;
   revisao: number;
   sem_ia: number;
   custo_usd: number;
-  matriz_contraste: { tabulacao_operador: string; esperada: string; total: number; categorias: Record<string, number> }[];
+  matriz_contraste: {
+    tabulacao_operador: string;
+    esperada: string;
+    esperadas: string[];
+    tipo: TipoTabulacao;
+    confirmada: boolean;
+    total: number;
+    categorias: Record<string, number>;
+  }[];
   ranking_operadores: { operador: string; total: number; qualificadas: number; divergencias: number; taxa_divergencia: number }[];
   categorias: {
     codigo: string;
@@ -157,8 +172,47 @@ export type Saude = {
   erros_recentes: { id: number; id_ligacao: number | null; data_ligacao: string | null; erro: string | null; operador_nome: string | null }[];
   custos: Custos;
   revisao_pendente: number;
+  tabulacoes_pendentes: number;
   alertas: { nivel: "critico" | "atencao"; titulo: string; mensagem: string }[];
 };
+
+export type TipoTabulacao = "resultado" | "nao_tabulado" | "ignorar";
+
+export type RegraTabulacao = {
+  tipo: TipoTabulacao;
+  categorias: string[];
+  subcategoria: string | null;
+  nao_ligar: boolean;
+};
+
+export type Tabulacao = RegraTabulacao & {
+  id: number;
+  nome: string;
+  id_argus: number | null;
+  confirmada: boolean;
+  atualizado_em: string | null;
+  ligacoes: number;
+  qualificadas: number;
+  divergencias: number;
+  divergencias_altas: number;
+  taxa_divergencia: number;
+};
+
+export type TabulacoesResp = {
+  itens: Tabulacao[];
+  resumo: { total: number; confirmadas: number; pendentes: number; ligacoes_pendentes: number; nao_ligar_registrado: boolean };
+  opcoes: {
+    tipos: Record<TipoTabulacao, string>;
+    categorias: Record<string, { label: string; subs: Record<string, string> }>;
+    gravidades: Record<string, string>;
+  };
+};
+
+async function enviarJson<T>(path: string, method: string, body: unknown): Promise<T> {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(await parseError(r));
+  return r.json();
+}
 
 export function qs(params: Record<string, unknown> = {}) {
   const u = new URLSearchParams();
@@ -191,10 +245,19 @@ export async function post<T>(path: string, params: Record<string, unknown> = {}
 }
 
 export const api = {
+  tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
+  salvarTabulacao: (id: number, regra: RegraTabulacao) =>
+    enviarJson<{ tabulacao: Tabulacao; recalculadas: number; mudaram: number }>(`/api/v1/tabulacoes/${id}`, "PUT", regra),
+  importarTabulacoes: (arquivo: File) => {
+    const fd = new FormData();
+    fd.append("arquivo", arquivo);
+    return post<{ importadas: number; erros: string[]; recalculadas: number; mudaram: number }>("/api/v1/tabulacoes/importar", {}, fd);
+  },
   summary: (f: Filters) => get<Summary>("/api/v1/analytics/summary", f),
   timeline: (f: Filters) => get<TimelineRow[]>("/api/v1/analytics/timeline", f),
   horas: (f: Filters) => get<HourRow[]>("/api/v1/analytics/horas", f),
-  calls: (f: Filters, page: number, page_size = 50) => get<CallsPage>("/api/v1/calls", { ...f, page, page_size }),
+  calls: (f: Filters, page: number, page_size = 50, ordenar?: "data" | "gravidade") =>
+    get<CallsPage>("/api/v1/calls", { ...f, page, page_size, ordenar }),
   call: (id: number) => get<Call>(`/api/v1/calls/${id}`),
   taxonomy: () => get<Taxonomy>("/api/v1/taxonomy"),
   options: () => get<FilterOptions>("/api/v1/analyst/filters-options"),
@@ -216,4 +279,5 @@ export const api = {
 };
 
 export const audioUrl = (id: number) => `/api/v1/calls/${id}/audio`;
+export const exportTabulacoesUrl = "/api/v1/tabulacoes/exportar";
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;

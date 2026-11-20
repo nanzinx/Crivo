@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { AlertOctagon, AlertTriangle, ChevronDown, Info, Loader2, PhoneOff } from "lucide-react";
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 import { cn, catColor, catLabel } from "@/lib/utils";
 
@@ -162,5 +162,30 @@ export function Meter({ value, className }: { value?: number | null; className?:
       </div>
       <span className="num w-9 text-right text-xs text-ink-2">{value == null ? "–" : `${Math.round(v * 100)}%`}</span>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- Gravidade da divergência (status: cor + ícone + texto)
+const GRAV = {
+  alta: { label: "Alta", icon: AlertOctagon, cls: "bg-critical/10 text-critical" },
+  media: { label: "Média", icon: AlertTriangle, cls: "bg-serious/15 text-ink" },
+  baixa: { label: "Baixa", icon: Info, cls: "bg-raised text-ink-2" },
+} as const;
+
+export function GravidadePill({ g, className }: { g?: string | null; className?: string }) {
+  if (!g || !(g in GRAV)) return null;
+  const { label, icon: Icon, cls } = GRAV[g as keyof typeof GRAV];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", cls, className)} title={`Gravidade ${label.toLowerCase()}`}>
+      <Icon className="h-3 w-3" /> {label}
+    </span>
+  );
+}
+
+export function NaoLigarPill({ className }: { className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand-ink", className)} title="O cliente pediu para não receber mais ligações (LGPD)">
+      <PhoneOff className="h-3 w-3" /> não ligar
+    </span>
   );
 }

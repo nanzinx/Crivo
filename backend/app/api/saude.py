@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from .. import worker
 from ..config import settings
 from ..database import get_db
-from ..models import Call, agora
-from ..services import argus_client, custos, status
+from ..models import Call, Tabulacao, agora
+from ..services import argus_client, custos, pipeline, status
 
 router = APIRouter(prefix="/api/v1", tags=["saude"])
 
@@ -32,7 +32,8 @@ def _em_horario_comercial(now: datetime) -> bool:
     return now.weekday() < 6 and ini <= now.hour < fim
 
 
-def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: dict | None = None) -> list[dict]:
+def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: dict | None = None,
+             pendentes_tab: int = 0) -> list[dict]:
     out: list[dict] = []
     add = lambda nivel, titulo, msg: out.append({"nivel": nivel, "titulo": titulo, "mensagem": msg})  # noqa: E731
     argus_on = bool(settings.argus_token)
@@ -71,6 +72,10 @@ def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: d
         if custo.get("modelos_sem_preco"):
             add("atencao", "Modelo sem preço cadastrado",
                 f"Custo de {', '.join(custo['modelos_sem_preco'])} não está sendo contado. Defina os preços no .env.")
+    if pendentes_tab:
+        add("atencao", "Tabulações sem revisão",
+            f"{pendentes_tab} tabulação(ões) do Argus com significado apenas sugerido. "
+            "Confirme em Modelo de tabulação para a divergência ser confiável.")
     if fila > settings.alerta_fila_max:
         add("atencao", "Fila acumulada", f"{fila} ligações aguardando processamento.")
     return out
@@ -86,6 +91,10 @@ def saude(db: Session = Depends(get_db)):
     fila = worker.queue_size()
 
     custo = custos.resumo(db)
+    pipeline.vincular_pendentes(db)
+    pendentes_tab = db.scalar(
+        select(func.count(func.distinct(Tabulacao.id))).join(Call, Call.tabulacao_id == Tabulacao.id)
+        .where(Tabulacao.confirmada.is_(False))) or 0
     erros = db.scalars(select(Call).where(Call.status == "error").order_by(Call.id.desc()).limit(15)).all()
     ultimas_24h = db.scalar(select(func.count(Call.id)).where(Call.criado_em >= now - timedelta(hours=24))) or 0
     ultima = db.scalar(select(func.max(Call.data_ligacao)))
@@ -110,5 +119,6 @@ def saude(db: Session = Depends(get_db)):
         ],
         "custos": custo,
         "revisao_pendente": db.scalar(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True))) or 0,
-        "alertas": _alertas(eventos, por_status, fila, now, custo),
+        "tabulacoes_pendentes": pendentes_tab,
+        "alertas": _alertas(eventos, por_status, fila, now, custo, pendentes_tab),
     }

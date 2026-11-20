@@ -1,4 +1,12 @@
-"""Taxonomia oficial de categorias/subcategorias (fonte única de verdade)."""
+"""Taxonomia oficial de categorias/subcategorias (fonte única de verdade).
+
+Versão 2: + "Desligou na abertura", "Ligação caiu" e "Já é cliente". O pedido de "não ligar mais"
+(LGPD) não é uma categoria: é uma marcação à parte (`pediu_nao_ligar`), porque pode acontecer em
+qualquer resultado (o titular sem interesse ou um terceiro que atendeu).
+Cada ligação qualificada guarda a versão usada (`taxonomia_versao`).
+"""
+
+TAXONOMIA_VERSAO = 2
 
 CATEGORIES: dict[str, dict] = {
     "EM_NEGOCIACAO": {
@@ -30,16 +38,19 @@ CATEGORIES: dict[str, dict] = {
             "CLIENTE_REVOLTADO": "Cliente revoltado",
             "CLIENTE_CALMO": "Cliente calmo",
             "JA_POSSUI": "Já possui / sem margem",
+            "JA_E_CLIENTE": "Já é cliente / já contratou com a empresa",
         },
     },
     "LIGACAO_MUDA": {
         "label": "Ligação Muda",
-        "desc": "A gravação não apresenta o áudio do cliente.",
+        "desc": "Não houve diálogo efetivo com o cliente (silêncio, um lado só, ou a ligação acabou antes da conversa).",
         "subs": {
             "ATENDENTE_SOLITARIO": "Atendente solitário",
             "CLIENTE_SOLITARIO": "Cliente solitário",
             "FALHA_COMUNICACAO": "Falha de comunicação",
             "MUDO_TOTAL": "Mudo total (silêncio bilateral)",
+            "DESLIGOU_NA_ABERTURA": "Desligou logo na abertura",
+            "LIGACAO_CAIU": "Ligação caiu / interrompida",
         },
     },
     "CAIXA_POSTAL": {

@@ -106,7 +106,13 @@ function Dashboard() {
           loading={loading}
           tone={s && s.divergencias.taxa >= 20 ? "critical" : s && s.divergencias.taxa >= 10 ? "warn" : "good"}
           icon={<AlertTriangle className="h-4 w-4" />}
-          hint={s ? `${fmtInt(s.divergencias.total)} de ${fmtInt(s.divergencias.comparaveis)} comparáveis` : undefined}
+          hint={
+            s
+              ? s.divergencias.total
+                ? `${fmtInt(s.divergencias.por_gravidade.alta)} alta · ${fmtInt(s.divergencias.por_gravidade.media)} média · ${fmtInt(s.divergencias.por_gravidade.baixa)} baixa`
+                : `0 de ${fmtInt(s.divergencias.comparaveis)} comparáveis`
+              : undefined
+          }
           onClick={() => setFilters({ divergencia: f.divergencia === "true" ? "" : "true" })}
           active={f.divergencia === "true"}
           delay={0.08}
