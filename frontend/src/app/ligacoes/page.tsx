@@ -149,7 +149,7 @@ function Ligacoes() {
                           </Pill>
                         ))}
                       {c.pediu_nao_ligar && <NaoLigarPill />}
-                      {c.precisa_revisao && (
+                      {c.motivo_fila && (
                         <Pill tone="warn">
                           <Ear className="h-3 w-3" /> revisar
                         </Pill>
@@ -221,8 +221,8 @@ function Row({ c, items, active, onOpen, index }: { c: Call; items: Call[]; acti
           {c.categoria && <CategoryBadge code={c.categoria} sub={c.subcategoria_label !== "-" ? c.subcategoria_label : null} />}
           {c.divergencia_tabulacao && <GravidadePill g={c.divergencia_gravidade} />}
           {c.pediu_nao_ligar && <NaoLigarPill />}
-          {c.precisa_revisao && (
-            <span title={c.revisao_motivo ?? "Precisa de revisão humana"}>
+          {c.motivo_fila && (
+            <span title={c.motivo_fila ?? "Precisa de revisão humana"}>
               <Pill tone="warn">
                 <Ear className="h-3 w-3" /> revisar
               </Pill>

@@ -9,7 +9,7 @@ from .. import worker
 from ..config import settings
 from ..database import get_db
 from ..models import Call, Tabulacao, agora
-from ..services import argus_client, custos, pipeline, status
+from ..services import argus_client, custos, pipeline, qualidade, status
 
 router = APIRouter(prefix="/api/v1", tags=["saude"])
 
@@ -118,7 +118,7 @@ def saude(db: Session = Depends(get_db)):
             for c in erros
         ],
         "custos": custo,
-        "revisao_pendente": db.scalar(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True))) or 0,
+        "revisao_pendente": db.scalar(select(func.count(Call.id)).where(Call.status == "done", qualidade.cond_fila())) or 0,
         "tabulacoes_pendentes": pendentes_tab,
         "alertas": _alertas(eventos, por_status, fila, now, custo, pendentes_tab),
     }

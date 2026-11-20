@@ -16,13 +16,14 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-111%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-123%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
 <a href="#-como-funciona">Como funciona</a> ·
 <a href="#%EF%B8%8F-configuração">Configuração</a> ·
 <a href="#%EF%B8%8F-modelo-de-tabulação">Modelo de tabulação</a> ·
+<a href="#-qualidade-da-ia">Qualidade da IA</a> ·
 <a href="#-custo-de-ia">Custo de IA</a> ·
 <a href="#-api">API</a> ·
 <a href="#%EF%B8%8F-roadmap">Roadmap</a>
@@ -110,10 +111,26 @@ Toda divergência tem gravidade **alta, média ou baixa**. O pedido de "não lig
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 🎯 Qualidade da IA medida
+Cada revisão humana vira gabarito: acerto geral e por categoria, onde a IA confunde, se a confiança dela é confiável e quantas divergências apontadas a revisão confirmou.
+
+</td>
+<td valign="top">
+
+### 🎲 Amostra sem viés
+Além dos casos duvidosos, uma amostra aleatória (`AMOSTRA_QUALIDADE_PCT`) entra na fila de revisão, para a medição não ficar só nos casos difíceis.
+
+</td>
+</tr>
 </table>
 
 <div align="center">
 <img src="docs/img/modelo-tabulacao.png" alt="Modelo de tabulação" width="100%" />
+<br/><br/>
+<img src="docs/img/qualidade-ia.png" alt="Qualidade da IA" width="100%" />
 <br/><br/>
 <img src="docs/img/matriz-operadores.png" alt="Matriz de contraste e ranking de operadores" width="100%" />
 <br/><br/>
@@ -239,6 +256,7 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `TRANSCRICAO_POR_CANAL` | No estéreo separado, transcrever operador e cliente em separado | `true` |
 | `ARGUS_CANAL_OPERADOR` | Canal do operador no estéreo (`0` esquerdo, `1` direito) | `0` |
 | `CONFIANCA_MINIMA_DIVERGENCIA` | Abaixo disso, vai para revisão humana em vez de divergência | `0.6` |
+| `AMOSTRA_QUALIDADE_PCT` | % das ligações sorteadas para revisão humana (medição sem viés) | `2` |
 | `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
 | `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
 | `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
@@ -297,6 +315,36 @@ A tabulação do Argus é texto livre e, muitas vezes, mais genérica que a taxo
 A IA marca quando quem atendeu **pede para não receber mais ligações** (recusa simples não conta). Isso vale para qualquer categoria e aparece com o selo *não ligar*, no filtro e na aba própria de "Para revisar agora".
 
 O pedido só conta contra o operador se existir no Argus uma tabulação marcada como *Registra "não ligar"*. Sem ela, o operador não teria como registrar.
+
+---
+
+## 🎯 Qualidade da IA
+
+**Revisão pela tela.** No detalhe da ligação, depois de ouvir, o supervisor responde "a IA acertou?". Pode confirmar com um clique ou corrigir a categoria, com uma observação.
+- A revisão passa a ser o **resultado da ligação**: painéis e divergência usam o resultado humano.
+- A resposta original da IA fica guardada, para comparação.
+- Reanalisar a ligação com a IA não apaga a revisão, e dá para desfazer a revisão.
+
+**Fila de revisão** (`/ligacoes?revisao=true`):
+- casos em que a IA não teve segurança;
+- casos em que o áudio contradiz a tabulação;
+- uma **amostra aleatória** de `AMOSTRA_QUALIDADE_PCT`% das ligações (padrão: 2%). O sorteio é fixo por ligação.
+
+**Escuta manual como gabarito.** O CSV/HTML de escuta importado entra como revisão humana. O botão *Medir com a escuta manual*, na página *Qualidade da IA*, roda a IA nessas ligações (custa) e compara.
+
+**O que a página mostra:**
+
+| Métrica | Para quê |
+|---|---|
+| Acerto da IA | % de revisões em que a IA acertou a categoria |
+| Onde a IA confunde | Matriz de confusão: revisão humana × IA |
+| Acerto por faixa de confiança | Calibrar `CONFIANCA_MINIMA_DIVERGENCIA` |
+| Divergências confirmadas | Das divergências que a IA apontou, quantas a revisão confirmou (o quanto dá para confiar numa acusação) |
+| Divergências que a IA deixou passar | Erros do operador vistos só na revisão |
+| Por quem analisou | IA × análise local (ligações sem fala resolvidas sem IA) |
+
+> [!NOTE]
+> Com poucas revisões os percentuais oscilam muito. A página avisa abaixo de 50 revisões; para uma margem de ±5%, o ideal é perto de 400.
 
 ---
 
@@ -380,8 +428,11 @@ python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,g
 | `PUT` | `/api/v1/tabulacoes/{id}` | Confirma/corrige uma tabulação e recalcula as ligações |
 | `GET` | `/api/v1/tabulacoes/exportar` | Modelo em CSV |
 | `POST` | `/api/v1/tabulacoes/importar` | Importa o modelo de uma planilha CSV |
+| `POST` / `DELETE` | `/api/v1/calls/{id}/revisao` | Registra / desfaz a revisão humana |
+| `GET` | `/api/v1/qualidade` | Acurácia, matriz de confusão, calibração e discordâncias |
+| `POST` | `/api/v1/qualidade/medir?n=50` | Roda a IA em ligações da escuta manual para comparar (custa) |
 
-**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `gravidade`, `nao_ligar`, `revisao`, `status`, `q`. A listagem aceita `ordenar=gravidade`.
+**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `gravidade`, `nao_ligar`, `revisao` (fila de revisão), `revisado`, `status`, `q`. A listagem aceita `ordenar=gravidade`.
 
 </details>
 
@@ -461,10 +512,10 @@ cd frontend && npm run typecheck && npm run build
   - Taxonomia v2: desligou na abertura, ligação caiu, já é cliente; pedido de não ligar (LGPD).
   - Divergência por gravidade.
   - Pendente: confirmar as tabulações reais com a lista oficial do Argus.
-- [ ] **Semana 3: medir a IA.**
-  - Revisão humana pela tela.
-  - Acurácia e matriz de confusão por categoria, usando o CSV de escuta como gabarito.
-  - Fila de baixa confiança.
+- [x] **Semana 3: medir a IA.**
+  - Revisão humana pela tela (confirmar/corrigir), guardando a resposta original da IA.
+  - Acurácia, matriz de confusão, precisão/cobertura por categoria e calibração da confiança.
+  - Fila de revisão com amostra aleatória; escuta manual como gabarito.
 - [ ] **Semana 4: escuta precisa e alertas.**
   - Áudio estéreo com as pontas A/B separadas, para diarização real.
   - Filtro de alucinações do Whisper no silêncio.

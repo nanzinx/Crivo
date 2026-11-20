@@ -190,6 +190,11 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
                 <option value="true">Precisa de revisão</option>
                 <option value="false">Sem pendência</option>
               </Select>
+              <Select label="Revisada por humano" value={f.revisado ?? ""} onChange={(e) => setFilters({ revisado: e.target.value })}>
+                <option value="">Todas</option>
+                <option value="true">Sim</option>
+                <option value="false">Não</option>
+              </Select>
               {showStatus && (
                 <Select label="Status" value={f.status ?? ""} onChange={(e) => setFilters({ status: e.target.value })}>
                   <option value="">Todos</option>

@@ -65,6 +65,17 @@ class Call(Base):
     ligacao_referencia_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"))
     erro: Mapped[str | None] = mapped_column(Text)
 
+    # Resposta original da IA (preservada mesmo depois de uma revisão humana mudar `categoria`)
+    categoria_ia: Mapped[str | None] = mapped_column(String(40), index=True)
+    subcategoria_ia: Mapped[str | None] = mapped_column(String(60))
+    # Revisão humana feita pela tela (ou escuta manual importada): é o gabarito para medir a IA
+    categoria_revisada: Mapped[str | None] = mapped_column(String(40))
+    subcategoria_revisada: Mapped[str | None] = mapped_column(String(60))
+    revisado_por: Mapped[str | None] = mapped_column(String(80))
+    revisado_em: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    revisao_observacao: Mapped[str | None] = mapped_column(Text)
+    na_amostra: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)  # sorteada p/ revisão
+
     # Revisão humana: a IA não teve segurança, ou o áudio contradiz a tabulação
     precisa_revisao: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)
     revisao_motivo: Mapped[str | None] = mapped_column(String(255))

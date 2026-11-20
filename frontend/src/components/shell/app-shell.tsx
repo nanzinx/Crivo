@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
+import { Activity, Gauge, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/", label: "Visão geral", short: "Visão", icon: LayoutDashboard },
   { href: "/ligacoes", label: "Ligações", short: "Ligações", icon: ListMusic },
   { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks },
+  { href: "/qualidade", label: "Qualidade da IA", short: "Qualidade", icon: Gauge },
   { href: "/saude", label: "Saúde do sistema", short: "Saúde", icon: Activity },
 ];
 
@@ -178,7 +179,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <PlayerBar />
 
       {/* Bottom nav (mobile/tablet) */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         {NAV.map(({ href, short, icon: Icon }) => (
           <Link
             key={href}

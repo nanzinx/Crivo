@@ -17,6 +17,7 @@ const KEYS: (keyof Filters)[] = [
   "desligado_por",
   "divergencia",
   "revisao",
+  "revisado",
   "gravidade",
   "nao_ligar",
   "status",

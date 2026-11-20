@@ -14,6 +14,7 @@ import {
   Play,
   Quote,
   RefreshCw,
+  UserCheck,
   UserRound,
   X,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { usePlayer } from "@/components/player/player-context";
+import { RevisaoPanel } from "./revisao-panel";
 import { Button, CategoryBadge, GravidadePill, Meter, NaoLigarPill, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, type Call } from "@/lib/api";
 import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone, fmtUsd } from "@/lib/utils";
@@ -170,10 +172,12 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </div>
               <div className={cn("rounded-2xl border p-3", c.divergencia_tabulacao ? "border-critical/40 bg-critical/[.04]" : "border-line")}>
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-                  <Bot className="h-3.5 w-3.5" /> IA ouviu
+                  {c.revisado ? <UserCheck className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />} {c.revisado ? "Revisão humana" : "IA ouviu"}
                 </div>
                 <CategoryBadge code={c.categoria} className="text-sm" />
-                <div className="mt-1 truncate text-xs text-ink-muted">{c.subcategoria_label}</div>
+                {c.subcategoria_label && c.subcategoria_label !== "-" && (
+                  <div className="mt-1 truncate text-xs text-ink-muted">{c.subcategoria_label}</div>
+                )}
               </div>
             </section>
             {c.divergencia_tabulacao && (
@@ -203,15 +207,17 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </p>
             )}
 
-            {c.precisa_revisao && (
+            {c.motivo_fila && (
               <p className="-mt-2 flex items-start gap-2 rounded-xl bg-warn/15 p-3 text-xs text-ink">
                 <Ear className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  <b className="font-semibold">Precisa de revisão humana:</b> {c.revisao_motivo} Enquanto ninguém ouvir, esta ligação
-                  não conta como divergência do operador.
+                  <b className="font-semibold">Na fila de revisão humana:</b> {c.motivo_fila}
+                  {c.precisa_revisao && " Enquanto ninguém ouvir, esta ligação não conta como divergência do operador."}
                 </span>
               </p>
             )}
+
+            <RevisaoPanel c={c} />
 
             {c.erro && (
               <p className="flex items-start gap-2 rounded-xl bg-critical/[.06] p-3 text-xs">

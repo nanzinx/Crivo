@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from .api import calls, saude, sync, tabulacoes, webhooks
+from .api import calls, qualidade, saude, sync, tabulacoes, webhooks
 from .config import settings
 from .database import init_db
 from .services import argus_client, sincronizador
@@ -66,6 +66,7 @@ app.include_router(webhooks.router)
 app.include_router(sync.router)
 app.include_router(saude.router)
 app.include_router(tabulacoes.router)
+app.include_router(qualidade.router)
 
 
 @app.get("/health")

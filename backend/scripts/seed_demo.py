@@ -15,7 +15,8 @@ from sqlalchemy import delete
 
 from app.database import SessionLocal, init_db
 from app.models import Call
-from app.services import custos, pipeline, status
+from app.services import custos, pipeline, qualidade, status
+from app.taxonomy import CATEGORIES
 
 OPERADORES = ["Ana Lima", "Bruno Costa", "Carla Dias", "Diego Rocha", "Elisa Prado", "Fábio Nunes",
               "Gabi Torres", "Hugo Melo", "Íris Campos", "João Reis"]
@@ -63,6 +64,14 @@ CENARIOS = [
      [("URA", "Este número de telefone não existe.")]),
     ("INDETERMINADO", "SEM_DADOS", 2, "TEMPO PÓS ATENDIMENTO", [("ATENDENTE", "...")]),
 ]
+# o que a IA costuma confundir com cada categoria (para simular erros realistas)
+CONFUSOES = {
+    "EM_NEGOCIACAO": ["SEM_INTERESSE"],
+    "NAO_E_O_CLIENTE": ["SEM_INTERESSE"],
+    "SEM_INTERESSE": ["NAO_E_O_CLIENTE", "EM_NEGOCIACAO"],
+    "LIGACAO_MUDA": ["CAIXA_POSTAL"],
+    "CAIXA_POSTAL": ["LIGACAO_MUDA"],
+}
 # tabulações que o operador escolhe quando erra (gera divergência realista)
 TABULACOES_ERRADAS = ["CLIENTE NÃO TEM INTERESSE", "LIGAÇÃO MUDA / CAIXA POSTAL", "TEMPO PÓS ATENDIMENTO",
                       "NÃO É O CLIENTE"]
@@ -142,6 +151,20 @@ def gerar(n: int, seed: int = 42) -> int:
                 c.qualificado_em = c.data_ligacao + timedelta(minutes=2)
                 c.pediu_nao_ligar = any("pare de ligar" in t["text"].lower() for t in turnos)
                 c.taxonomia_versao = 2
+                # A IA erra às vezes (com confiança menor quando erra), e parte das ligações já foi revisada
+                verdade = (c.categoria, c.subcategoria)
+                if c.motor == "openai" and c.categoria != "INDETERMINADO" and rng.random() < 0.10:
+                    errada = rng.choice(CONFUSOES[c.categoria])
+                    c.categoria, c.subcategoria = errada, next(iter(CATEGORIES[errada]["subs"]))
+                    c.confianca = round(rng.uniform(0.45, 0.78), 2)
+                c.categoria_ia, c.subcategoria_ia = c.categoria, c.subcategoria
+                c.na_amostra = qualidade.na_amostra(c)
+                if rng.random() < (0.5 if c.confianca < 0.6 or c.na_amostra else 0.12):
+                    c.categoria, c.subcategoria = c.categoria_revisada, c.subcategoria_revisada = verdade
+                    c.revisado_por = rng.choice(["Supervisora Ana", "Supervisor Bruno"])
+                    c.revisado_em = c.qualificado_em + timedelta(hours=rng.randint(1, 30))
+                    if c.categoria != c.categoria_ia:
+                        c.revisao_observacao = "IA confundiu o resultado; corrigido na escuta."
             elif st == "error":
                 c.erro = "classificação: 429 rate limit (demonstração)"
             db.add(c)

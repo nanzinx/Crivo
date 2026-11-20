@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Divergência só é apontada com confiança da IA a partir daqui; abaixo, vai para revisão humana
     confianca_minima_divergencia: float = 0.6
 
+    # Porcentagem das ligações analisadas que vai, por sorteio, para a fila de revisão humana.
+    # Mede a IA sem viés: se só os casos duvidosos fossem revisados, a acurácia pareceria pior do que é.
+    amostra_qualidade_pct: float = 2
+
     database_url: str = f"sqlite:///{(DATA / 'crivo.db').as_posix()}"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

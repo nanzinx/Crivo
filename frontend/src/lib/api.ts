@@ -12,6 +12,7 @@ export type Filters = {
   desligado_por?: string;
   divergencia?: string; // "true" | "false"
   revisao?: string; // "true" | "false"
+  revisado?: string; // "true" | "false"
   gravidade?: string; // alta | media | baixa
   nao_ligar?: string; // "true" | "false"
   status?: string;
@@ -60,6 +61,17 @@ export type Call = {
   tabulacao_id?: number | null;
   tabulacao_confirmada?: boolean | null;
   precisa_revisao?: boolean;
+  motivo_fila?: string | null;
+  na_amostra?: boolean;
+  categoria_ia?: string | null;
+  subcategoria_ia?: string | null;
+  categoria_ia_label?: string | null;
+  subcategoria_ia_label?: string | null;
+  revisado?: boolean;
+  revisado_por?: string | null;
+  revisado_em?: string | null;
+  revisao_observacao?: string | null;
+  ia_acertou?: boolean | null;
   revisao_motivo?: string | null;
   fala_segundos?: number | null;
   custo_usd?: number;
@@ -176,6 +188,38 @@ export type Saude = {
   alertas: { nivel: "critico" | "atencao"; titulo: string; mensagem: string }[];
 };
 
+export type Qualidade = {
+  avaliadas: number;
+  acertos: number;
+  acuracia: number;
+  acuracia_subcategoria: number;
+  amostra_pequena: boolean;
+  por_categoria: { codigo: string; label: string; humano: number; ia: number; acertos: number; precisao: number; recall: number }[];
+  confusao: { categorias: string[]; linhas: { humano: string; total: number; ia: Record<string, number> }[] };
+  por_confianca: { faixa: string; n: number; acertos: number; acuracia: number }[];
+  por_motor: { motor: string; n: number; acuracia: number }[];
+  divergencias: { apontadas: number; confirmadas: number; precisao: number; perdidas: number };
+  fila: { pendentes: number; revisadas_7d: number; amostra_pct: number; confianca_minima: number };
+  gabarito: { revisadas_sem_resposta_ia: number };
+  discordancias: {
+    id: number;
+    id_ligacao: number | null;
+    data_ligacao: string | null;
+    operador_nome: string | null;
+    humano: string;
+    humano_label: string;
+    humano_sub_label: string | null;
+    ia: string;
+    ia_label: string;
+    ia_sub_label: string | null;
+    confianca: number | null;
+    revisado_por: string | null;
+    observacao: string | null;
+  }[];
+};
+
+export type RevisaoIn = { categoria: string; subcategoria: string | null; revisor: string; observacao: string | null };
+
 export type TipoTabulacao = "resultado" | "nao_tabulado" | "ignorar";
 
 export type RegraTabulacao = {
@@ -245,6 +289,10 @@ export async function post<T>(path: string, params: Record<string, unknown> = {}
 }
 
 export const api = {
+  qualidade: () => get<Qualidade>("/api/v1/qualidade"),
+  medirQualidade: (n: number) => post<{ enfileiradas: number; custo_estimado_usd: number }>("/api/v1/qualidade/medir", { n }),
+  revisar: (id: number, r: RevisaoIn) => enviarJson<Call>(`/api/v1/calls/${id}/revisao`, "POST", r),
+  desfazerRevisao: (id: number) => enviarJson<Call>(`/api/v1/calls/${id}/revisao`, "DELETE", undefined),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
     enviarJson<{ tabulacao: Tabulacao; recalculadas: number; mudaram: number }>(`/api/v1/tabulacoes/${id}`, "PUT", regra),

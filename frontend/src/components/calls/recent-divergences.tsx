@@ -110,8 +110,8 @@ export function RecentDivergences() {
                       {c.pediu_nao_ligar && aba === "divergencia" && <NaoLigarPill className="shrink-0" />}
                     </div>
                   ) : (
-                    <div className="mt-1 truncate text-xs text-ink-2" title={c.revisao_motivo ?? ""}>
-                      {c.revisao_motivo}
+                    <div className="mt-1 truncate text-xs text-ink-2" title={c.motivo_fila ?? ""}>
+                      {c.motivo_fila}
                     </div>
                   )}
                 </div>

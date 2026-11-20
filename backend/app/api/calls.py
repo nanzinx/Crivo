@@ -5,13 +5,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel, model_validator
 from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Call, Tabulacao
-from ..services import tabulacoes
-from ..taxonomy import CATEGORIES, label_cat, label_sub
+from ..services import qualidade, tabulacoes
+from ..taxonomy import CATEGORIES, label_cat, label_sub, valid
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
 
@@ -33,6 +34,7 @@ def apply_filters(
     desligado_por: str | None = None,
     divergencia: bool | None = None,
     revisao: bool | None = None,
+    revisado: bool | None = None,
     gravidade: str | None = None,
     nao_ligar: bool | None = None,
 ):
@@ -72,8 +74,10 @@ def apply_filters(
         stmt = stmt.where(Call.divergencia_gravidade == gravidade)
     if nao_ligar is not None:
         stmt = stmt.where(Call.pediu_nao_ligar.is_(True) if nao_ligar else Call.pediu_nao_ligar.is_not(True))
-    if revisao is not None:
-        stmt = stmt.where(Call.precisa_revisao.is_(True) if revisao else Call.precisa_revisao.is_not(True))
+    if revisao is not None:  # fila de revisão humana: casos duvidosos + amostra aleatória não revisada
+        stmt = stmt.where(qualidade.cond_fila() if revisao else ~qualidade.cond_fila())
+    if revisado is not None:
+        stmt = stmt.where(Call.revisado_em.is_not(None) if revisado else Call.revisado_em.is_(None))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -134,6 +138,17 @@ def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None) 
         "tabulacao_id": c.tabulacao_id,
         "tabulacao_confirmada": (c.tabulacao_id in confirmadas) if confirmadas is not None and c.tabulacao_id else None,
         "precisa_revisao": bool(c.precisa_revisao),
+        "motivo_fila": qualidade.motivo_fila(c),
+        "na_amostra": bool(c.na_amostra),
+        "categoria_ia": c.categoria_ia,
+        "subcategoria_ia": c.subcategoria_ia,
+        "categoria_ia_label": label_cat(c.categoria_ia) if c.categoria_ia else None,
+        "subcategoria_ia_label": label_sub(c.categoria_ia, c.subcategoria_ia) if c.categoria_ia and c.subcategoria_ia else None,
+        "revisado": c.revisado_em is not None,
+        "revisado_por": c.revisado_por,
+        "revisado_em": c.revisado_em.isoformat() if c.revisado_em else None,
+        "revisao_observacao": c.revisao_observacao,
+        "ia_acertou": (c.categoria_ia == c.categoria_revisada) if c.categoria_ia and c.categoria_revisada else None,
         "revisao_motivo": c.revisao_motivo,
         "fala_segundos": c.fala_segundos,
         "custo_usd": round(c.custo_usd or 0, 5),
@@ -169,6 +184,7 @@ class Filtros:
         desligado_por: str | None = None,
         divergencia: bool | None = None,
         revisao: bool | None = None,
+        revisado: bool | None = None,
         gravidade: str | None = None,
         nao_ligar: bool | None = None,
         q: str | None = None,
@@ -178,7 +194,7 @@ class Filtros:
                        telefone=telefone, operador=operador, campanha=campanha, q=q, status=status, tronco=tronco,
                        tipo_agente=tipo_agente, tipo_discagem=tipo_discagem, desligado_por=desligado_por,
                        divergencia=divergencia, revisao=revisao,
-                       gravidade=gravidade, nao_ligar=nao_ligar)
+                       gravidade=gravidade, nao_ligar=nao_ligar, revisado=revisado)
 
     def __call__(self, stmt, **override):
         return apply_filters(stmt, **{**self.kw, **override})
@@ -263,6 +279,48 @@ def get_call(call_id: int, db: Session = Depends(get_db)):
     if c.ligacao_referencia_id and (ref := db.get(Call, c.ligacao_referencia_id)):
         out["ligacao_referencia"] = serialize(ref)
     return out
+
+
+class RevisaoIn(BaseModel):
+    categoria: str
+    subcategoria: str | None = None
+    revisor: str
+    observacao: str | None = None
+
+    @model_validator(mode="after")
+    def _validar(self):
+        if not valid(self.categoria, self.subcategoria):
+            raise ValueError("Categoria/subcategoria fora da taxonomia.")
+        if not self.revisor.strip():
+            raise ValueError("Informe quem está revisando.")
+        return self
+
+
+@router.post("/calls/{call_id}/revisao")
+def revisar(call_id: int, r: RevisaoIn, db: Session = Depends(get_db)):
+    """Revisão humana: confirma ou corrige o resultado da IA. Vira o resultado da ligação e o gabarito da medição."""
+    c = db.get(Call, call_id)
+    if not c:
+        raise HTTPException(404, "Ligação não encontrada")
+    if c.status != "done" or not c.categoria:
+        raise HTTPException(409, "A ligação ainda não foi analisada.")
+    qualidade.revisar(db, c, r.categoria, r.subcategoria, r.revisor, r.observacao)
+    db.commit()
+    return serialize(c, full=True, confirmadas=_confirmadas(db))
+
+
+@router.delete("/calls/{call_id}/revisao")
+def desfazer_revisao(call_id: int, db: Session = Depends(get_db)):
+    c = db.get(Call, call_id)
+    if not c:
+        raise HTTPException(404, "Ligação não encontrada")
+    if c.revisado_em is None:
+        raise HTTPException(409, "Esta ligação não foi revisada.")
+    if c.categoria_ia is None:
+        raise HTTPException(409, "Sem resposta da IA para voltar (resultado veio da escuta manual).")
+    qualidade.desfazer(db, c)
+    db.commit()
+    return serialize(c, full=True, confirmadas=_confirmadas(db))
 
 
 @router.get("/calls/{call_id}/audio")
@@ -394,7 +452,7 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
                                                     Call.divergencia_gravidade.is_not(None))
                                              .group_by(Call.divergencia_gravidade))).all()),
                          "taxa": round(100 * total_div / comparaveis, 1) if comparaveis else 0},
-        "revisao": db.scalar(f(select(func.count(Call.id)).where(Call.precisa_revisao.is_(True)))) or 0,
+        "revisao": db.scalar(f(select(func.count(Call.id)).where(qualidade.cond_fila()))) or 0,
         "sem_ia": db.scalar(f(select(func.count(Call.id)).where(Call.motor == "local"))) or 0,
         "custo_usd": round(db.scalar(f(select(func.coalesce(func.sum(Call.custo_usd), 0.0)))) or 0, 4),
         "matriz_contraste": sorted(matriz.values(), key=lambda x: -x["total"])[:15],

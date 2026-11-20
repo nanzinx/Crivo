@@ -163,6 +163,8 @@ def import_legacy_csv(db: Session, path: str | None = None) -> dict:
             sub = _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label)))
             call.categoria, call.subcategoria = cat, sub
             call.status, call.motor, call.confianca = "done", "csv", 0.8
+            call.categoria_revisada, call.subcategoria_revisada = cat, sub
+            call.revisado_por, call.revisado_em = "Escuta manual (CSV)", agora()
             call.resumo = "Importado do relatório de escuta anterior."
             call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
             call.qualificado_em = agora()
@@ -361,6 +363,8 @@ def import_legacy_html(db: Session, path: str | None = None) -> dict:
             sub = _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label)))
             call.categoria, call.subcategoria = cat, sub
             call.status, call.motor, call.confianca = "done", "html", 0.85
+            call.categoria_revisada, call.subcategoria_revisada = cat, sub
+            call.revisado_por, call.revisado_em = "Escuta manual (HTML)", agora()
             call.resumo = "Auditado da base de gravações."
             call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
             call.qualificado_em = agora()
