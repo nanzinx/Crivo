@@ -16,12 +16,13 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-69%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-111%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
 <a href="#-como-funciona">Como funciona</a> ·
 <a href="#%EF%B8%8F-configuração">Configuração</a> ·
+<a href="#%EF%B8%8F-modelo-de-tabulação">Modelo de tabulação</a> ·
 <a href="#-custo-de-ia">Custo de IA</a> ·
 <a href="#-api">API</a> ·
 <a href="#%EF%B8%8F-roadmap">Roadmap</a>
@@ -95,9 +96,25 @@ Ligações sem nenhuma fala são resolvidas **sem IA**. Cada chamada paga é reg
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 🗂️ Modelo de tabulação
+Cada tabulação do Argus entra num catálogo com um significado **sugerido**; a equipe confirma ou corrige na tela (ou por planilha), e as ligações são recalculadas na hora.
+
+</td>
+<td valign="top">
+
+### 🚦 Gravidade e LGPD
+Toda divergência tem gravidade **alta, média ou baixa**. O pedido de "não ligar mais" é detectado na ligação e, se não for tabulado, vira divergência alta.
+
+</td>
+</tr>
 </table>
 
 <div align="center">
+<img src="docs/img/modelo-tabulacao.png" alt="Modelo de tabulação" width="100%" />
+<br/><br/>
 <img src="docs/img/matriz-operadores.png" alt="Matriz de contraste e ranking de operadores" width="100%" />
 <br/><br/>
 <img src="docs/img/ligacao-detalhe.png" alt="Detalhe de uma ligação divergente" width="49%" />
@@ -151,9 +168,9 @@ flowchart LR
    - Se a IA falhar, a ligação fica com **erro** e volta para a fila; o sistema nunca inventa uma categoria.
    - A transcrição já obtida é preservada, e reanalisar uma ligação não paga a transcrição de novo.
    - Se o áudio for ruim, a IA pode responder "Indeterminado" em vez de chutar.
-4. **Cruzamento.** O relatório detalhado da discadora traz operador, tronco, sinalização SIP e tabulação. O Crivo compara a tabulação do operador com a classificação da IA e chega a um de três resultados:
+4. **Cruzamento.** O relatório detalhado da discadora traz operador, tronco, sinalização SIP e tabulação. O Crivo compara a tabulação do operador com a classificação da IA usando o [modelo de tabulação](#%EF%B8%8F-modelo-de-tabulação) e chega a um de três resultados:
    - **coerente**;
-   - **divergente**, só quando a IA tem segurança (confiança a partir de `CONFIANCA_MINIMA_DIVERGENCIA`);
+   - **divergente** (com gravidade), só quando a IA tem segurança (confiança a partir de `CONFIANCA_MINIMA_DIVERGENCIA`);
    - **revisão humana**, quando a IA não teve segurança ou o áudio contradiz a tabulação.
 5. **Identidade.** Se alguém nega ser o titular mas o mesmo telefone e nome já se confirmaram antes, a ligação vira *"É o cliente (identificou-se em outras ligações)"*.
 6. **Monitoramento.** Cada etapa registra sucesso ou falha. O painel de saúde transforma isso em alertas.
@@ -248,6 +265,41 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 
 ---
 
+## 🗂️ Modelo de tabulação
+
+A tabulação do Argus é texto livre e, muitas vezes, mais genérica que a taxonomia (ex.: "Muda / Caixa postal"). O modelo de tabulação diz, para cada tabulação, o que ela significa:
+
+| Campo | Significado |
+|---|---|
+| **Tipo** | `resultado` (afirma o que aconteceu), `nao_tabulado` (ex.: tempo pós-atendimento: diverge se a IA ouviu conversa) ou `ignorar` (tabulação de sistema: nunca diverge) |
+| **Categorias** | As categorias da IA que **confirmam** a tabulação. Pode ser mais de uma |
+| **Subcategoria** | Opcional. Se definida, subcategoria diferente vira divergência baixa |
+| **Registra "não ligar"** | É a tabulação que o operador deve usar quando o cliente pede para não receber mais ligações |
+
+**Como alimentar:**
+- **Automático:** toda tabulação nova (webhook, polling, relatório da discadora) entra com um significado *sugerido* pelo texto, e o menu mostra quantas faltam confirmar. Quando o Argus envia o código da tabulação (`idTabulacao`), ele é guardado e passa a ter prioridade sobre o texto.
+- **Pela tela:** *Modelo de tabulação* → confirmar ou corrigir. Ao salvar, as ligações daquela tabulação são recalculadas.
+- **Por planilha:** exporte, edite e importe. Colunas: `tabulacao`, `tipo`, `categorias` (separadas por `|`, pelo nome ou pelo código), `subcategoria`, `nao_ligar` (sim/não) e, opcionalmente, `id_argus`.
+
+> [!IMPORTANT]
+> Enquanto uma tabulação estiver só *sugerida*, as divergências dela usam um palpite do sistema. A matriz e o detalhe da ligação avisam quando é o caso. Confirme as tabulações mais usadas primeiro.
+
+### Gravidade da divergência
+
+| Gravidade | Quando |
+|---|---|
+| 🔴 **Alta** | Envolve negociação (oportunidade perdida ou negociação que não existiu); houve conversa, mas foi tabulada como muda/caixa postal; ou o cliente pediu para não ligar e a tabulação não registra o pedido |
+| 🟠 **Média** | Resultado de conversa trocado (ex.: "sem interesse" × "não é o cliente"); tabulou conversa e não houve; ou não tabulou uma conversa |
+| ⚪ **Baixa** | Confusão entre muda e caixa postal, ou só a subcategoria diferente |
+
+### Pedido de não ligar (LGPD)
+
+A IA marca quando quem atendeu **pede para não receber mais ligações** (recusa simples não conta). Isso vale para qualquer categoria e aparece com o selo *não ligar*, no filtro e na aba própria de "Para revisar agora".
+
+O pedido só conta contra o operador se existir no Argus uma tabulação marcada como *Registra "não ligar"*. Sem ela, o operador não teria como registrar.
+
+---
+
 ## 💸 Custo de IA
 
 Cerca de 90% do custo é a **transcrição**, cobrada por minuto de áudio; a classificação é a parte barata. O Crivo audita **100% das ligações** e reduz o gasto assim:
@@ -324,8 +376,12 @@ python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,g
 | `POST` | `/api/v1/sync/argus` | Polling/backfill manual |
 | `POST` | `/api/v1/sync/process` | Envia pendentes e com erro para a fila |
 | `POST` | `/api/v1/sync/reprocess/{id}` | Reanalisa uma ligação |
+| `GET` | `/api/v1/tabulacoes` | Modelo de tabulação com uso e divergência por tabulação |
+| `PUT` | `/api/v1/tabulacoes/{id}` | Confirma/corrige uma tabulação e recalcula as ligações |
+| `GET` | `/api/v1/tabulacoes/exportar` | Modelo em CSV |
+| `POST` | `/api/v1/tabulacoes/importar` | Importa o modelo de uma planilha CSV |
 
-**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `revisao`, `status`, `q`.
+**Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `gravidade`, `nao_ligar`, `revisao`, `status`, `q`. A listagem aceita `ordenar=gravidade`.
 
 </details>
 
@@ -337,12 +393,12 @@ python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,g
 |---|---|
 | 🔵 **Em negociação** | Proposta em andamento · Aceite verbal · Agendamento de retorno · Migração para WhatsApp |
 | 🟠 **Não é o cliente** | É o cliente (histórico) · Engano direto · Terceiro/família · Chip novo · Titular falecido · Reclamação recorrente |
-| 🟢 **Sem interesse** | Cliente revoltado · Cliente calmo · Já possui / sem margem |
-| 🟡 **Ligação muda** | Atendente solitário · Cliente solitário · Falha de comunicação · Mudo total |
+| 🟢 **Sem interesse** | Cliente revoltado · Cliente calmo · Já possui / sem margem · Já é cliente |
+| 🟡 **Ligação muda** | Atendente solitário · Cliente solitário · Falha de comunicação · Mudo total · Desligou na abertura · Ligação caiu |
 | 🩷 **Caixa postal** | URA da operadora · Pós-bip · Fax/modem · Número inexistente |
 | ⚪ **Indeterminado** | Sem dados suficientes · Áudio inaudível |
 
-Fonte única: [`backend/app/taxonomy.py`](backend/app/taxonomy.py).
+Fonte única: [`backend/app/taxonomy.py`](backend/app/taxonomy.py). Esta é a **versão 2**; cada ligação guarda a versão com que foi qualificada. O pedido de "não ligar" é uma marcação à parte, não uma categoria.
 
 ---
 
@@ -400,10 +456,11 @@ cd frontend && npm run typecheck && npm run build
 - [ ] **Custo de IA, etapa 3.**
   - Avaliar transcrição própria (faster-whisper) ou provedor mais barato.
   - Conversa em ordem cronológica no estéreo (exige marcação de tempo na transcrição).
-- [ ] **Semana 2: modelo de tabulação.**
-  - Tabela de equivalência por ID de tabulação do Argus, editável na tela.
-  - Taxonomia v2: desligou na abertura, pediu para não ligar (LGPD), ligação caiu, já é cliente.
+- [x] **Semana 2: modelo de tabulação.**
+  - Catálogo de tabulações (por código do Argus ou texto), editável na tela e por planilha.
+  - Taxonomia v2: desligou na abertura, ligação caiu, já é cliente; pedido de não ligar (LGPD).
   - Divergência por gravidade.
+  - Pendente: confirmar as tabulações reais com a lista oficial do Argus.
 - [ ] **Semana 3: medir a IA.**
   - Revisão humana pela tela.
   - Acurácia e matriz de confusão por categoria, usando o CSV de escuta como gabarito.
