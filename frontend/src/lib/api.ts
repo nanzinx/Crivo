@@ -218,6 +218,55 @@ export type Qualidade = {
   }[];
 };
 
+export type Alerta = {
+  id: number;
+  chave: string;
+  tipo: "operador" | "tronco" | "nao_ligar" | "sistema";
+  nivel: "critico" | "atencao";
+  titulo: string;
+  mensagem: string;
+  link: string | null;
+  valor: number | null;
+  aberto_em: string;
+  atualizado_em: string;
+  resolvido_em: string | null;
+  notificado_em: string | null;
+  reconhecido_por: string | null;
+  reconhecido_em: string | null;
+};
+
+export type AlertasResp = {
+  abertos: Alerta[];
+  recentes: Alerta[];
+  canais: { webhook: boolean; email: boolean };
+  regras: { tipo: string; nome: string; descricao: string }[];
+  intervalo_minutos: number;
+  relatorio: { hora: number; dias: string };
+};
+
+export type Relatorio = {
+  id: number;
+  data: string;
+  gerado_em: string;
+  enviado_em: string | null;
+  envio_detalhe: string | null;
+  texto: string;
+  dados: {
+    total: number;
+    qualificadas: number;
+    divergencias: { total: number; taxa: number; por_gravidade: Record<string, number> };
+    mudas_pct: number;
+    nao_ligar: number;
+    fila_revisao: number;
+    revisadas_no_dia: number;
+    custo_usd: number;
+    acuracia_7d: { acuracia: number; avaliadas: number };
+    operadores: { operador: string; qualificadas: number; divergencias: number; taxa_divergencia: number; altas: number }[];
+    alertas_abertos: { nivel: string; titulo: string; mensagem: string }[];
+  };
+  envio?: { enviado: boolean; canais?: string[]; erros?: Record<string, string>; motivo?: string };
+};
+
 export type RevisaoIn = { categoria: string; subcategoria: string | null; revisor: string; observacao: string | null };
 
 export type TipoTabulacao = "resultado" | "nao_tabulado" | "ignorar";
@@ -289,6 +338,13 @@ export async function post<T>(path: string, params: Record<string, unknown> = {}
 }
 
 export const api = {
+  alertas: () => get<AlertasResp>("/api/v1/alertas"),
+  avaliarAlertas: () => post<{ novos: number; resolvidos: number; abertos: number; notificados: number }>("/api/v1/alertas/avaliar"),
+  reconhecerAlerta: (id: number, por: string) => enviarJson<Alerta>(`/api/v1/alertas/${id}/reconhecer`, "POST", { por }),
+  relatorios: () => get<{ itens: Relatorio[]; canais: { webhook: boolean; email: boolean } }>("/api/v1/relatorios"),
+  gerarRelatorio: (enviar: boolean, data?: string) => post<Relatorio>("/api/v1/relatorios/gerar", { enviar, data }),
+  enviarRelatorio: (id: number) => post<Relatorio>(`/api/v1/relatorios/${id}/enviar`),
+  testarNotificacao: () => post<{ enviado: boolean; canais?: string[]; erros?: Record<string, string>; motivo?: string }>("/api/v1/notificacoes/teste"),
   qualidade: () => get<Qualidade>("/api/v1/qualidade"),
   medirQualidade: (n: number) => post<{ enfileiradas: number; custo_estimado_usd: number }>("/api/v1/qualidade/medir", { n }),
   revisar: (id: number, r: RevisaoIn) => enviarJson<Call>(`/api/v1/calls/${id}/revisao`, "POST", r),
@@ -327,5 +383,6 @@ export const api = {
 };
 
 export const audioUrl = (id: number) => `/api/v1/calls/${id}/audio`;
+export const relatorioHtmlUrl = (id: number) => `/api/v1/relatorios/${id}/html`;
 export const exportTabulacoesUrl = "/api/v1/tabulacoes/exportar";
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;

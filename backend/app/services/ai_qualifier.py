@@ -63,6 +63,7 @@ class Resultado(BaseModel):
     pedido_nao_ligar: bool = False
     motor: str = "heuristica"
     uso: List[dict] = []  # chamadas pagas: {tipo, modelo, audio_segundos, tokens_entrada, tokens_saida}
+    alucinacoes_removidas: int = 0  # frases inventadas pelo Whisper que foram descartadas
     por_canal: bool = False  # transcrição feita um lado por canal (estéreo): `turnos` = falas agrupadas por lado
 
 
@@ -237,6 +238,43 @@ def _classificar_texto(client, texto: str, nome, tel, dur, modelo: str | None = 
 
 
 SEM_FALA = "(sem fala detectada neste lado da linha)"
+
+# Frases que o Whisper costuma INVENTAR em trechos de silêncio (vícios de legendas de vídeo).
+# "Fortes": removidas onde aparecerem. "Fracas": só se forem a transcrição inteira (podem ser fala real).
+_ALUCINACOES_FORTES = [re.compile(p) for p in (
+    r"^legendas? (pela comunidade )?amara ?org$",
+    r"^legendas? (por|pela) .{0,40}$",
+    r"^(muito )?obrigad[oa]s? (por|pela) (assistir|atencao|audiencia)( ao video)?$",
+    r"^(se )?inscrev(a|e)(-| )?se( no canal)?$",
+    r"^se inscreva( no canal)?$",
+    r"^(deixe|deixa) (seu|o) like$",
+    r"^ate (a proxima|o proximo video)$",
+    r"^(transcricao|traducao) (e|por) .{0,40}$",
+)]
+_ALUCINACOES_FRACAS = [re.compile(p) for p in (r"^(muito )?obrigad[oa]s?$",)]
+_FRASE_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _chave_frase(f: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", _norm(f))).strip()
+
+
+def limpar_alucinacoes(texto: str | None) -> tuple[str, int]:
+    """Remove frases típicas de alucinação do Whisper e repetições em laço. Devolve (texto, removidas)."""
+    frases = [f.strip() for f in _FRASE_RE.split((texto or "").strip()) if f.strip()]
+    removidas, limpas = 0, []
+    for f in frases:
+        k = _chave_frase(f)
+        if not k or any(p.match(k) for p in _ALUCINACOES_FORTES):
+            removidas += bool(k)
+            continue
+        if len(limpas) >= 1 and _chave_frase(limpas[-1]) == k and len(frases) >= 3:
+            continue  # mesma frase repetida em sequência: o Whisper "travou" em laço
+        limpas.append(f)
+    if limpas and all(any(p.match(_chave_frase(f)) for p in _ALUCINACOES_FRACAS) for f in limpas):
+        removidas += len(limpas)
+        limpas = []
+    return " ".join(limpas), removidas
 _LADO_RE = re.compile(r"^(ATENDENTE|CLIENTE): (.*)$")
 
 
@@ -252,16 +290,17 @@ def turnos_do_texto(texto: str | None) -> list[Turno]:
     return [Turno(speaker=m[1], text=m[2]) for m in linhas if m[2] != SEM_FALA]
 
 
-def _transcrever(client, audio_path: str, dur: float | None, modelo: str | None = None) -> tuple[str, list[dict], bool]:
+def _transcrever(client, audio_path: str, dur: float | None, modelo: str | None = None
+                 ) -> tuple[str, list[dict], bool, int, bool]:
     """Transcreve o áudio já tratado (silêncio cortado; um lado por canal no estéreo).
 
-    Devolve (texto, uso pago, por_canal). Se um lado falhar, levanta QualificacaoError com o uso
-    já pago e SEM transcrição parcial (para a próxima tentativa não tratar meio áudio como inteiro).
+    Devolve (texto, uso pago, por_canal, alucinações removidas, sem_fala). Se um lado falhar, levanta
+    QualificacaoError com o uso já pago e SEM transcrição parcial.
     """
     from . import audio_analyzer
 
     partes = audio_analyzer.preparar_para_transcricao(audio_path)
-    uso, textos = [], []
+    uso, textos, removidas = [], [], 0
     try:
         for p in partes:
             if not p.arquivo:
@@ -269,25 +308,35 @@ def _transcrever(client, audio_path: str, dur: float | None, modelo: str | None 
                 continue
             try:
                 args = (client, p.arquivo) if modelo is None else (client, p.arquivo, modelo)
-                textos.append(transcrever_audio(*args).strip())
+                bruto = transcrever_audio(*args).strip()
             except Exception as e:
                 raise QualificacaoError(f"transcrição: {str(e)[:300]}", uso=uso) from e
             uso.append({"tipo": "transcricao", "modelo": modelo or settings.openai_whisper_model,
                         "audio_segundos": p.segundos or float(dur or 0),
                         "audio_segundos_original": p.segundos_original or float(dur or 0)})
+            limpo, n = limpar_alucinacoes(bruto)
+            removidas += n
+            textos.append(limpo if limpo or p.lado is None else SEM_FALA)
     finally:
         audio_analyzer.limpar(partes)
+    sem_fala = all(t in ("", SEM_FALA) for t in textos)
     if partes[0].lado is None:
-        return textos[0], uso, False
-    return "\n".join(f"{p.lado}: {t.replace(chr(10), ' ')}" for p, t in zip(partes, textos)), uso, True
+        return textos[0], uso, False, removidas, sem_fala
+    texto = "\n".join(f"{p.lado}: {t.replace(chr(10), ' ')}" for p, t in zip(partes, textos))
+    return texto, uso, True, removidas, sem_fala
 
 
 def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None, dur: float | None,
                        transcricao: str | None = None) -> Resultado:
     client = _cliente_openai()
-    texto, uso = transcricao, []
+    texto, uso, removidas = transcricao, [], 0
     if not texto and audio_path and Path(audio_path).exists():
-        texto, uso, _ = _transcrever(client, audio_path, dur)
+        texto, uso, _, removidas, sem_fala = _transcrever(client, audio_path, dur)
+        if sem_fala:  # nada de fala real: não paga a classificação
+            resumo = ("A transcrição só tinha frases típicas de alucinação do Whisper em silêncio; tratada como "
+                      "ligação muda." if removidas else "A transcrição veio vazia; tratada como ligação muda.")
+            return Resultado(categoria="LIGACAO_MUDA", subcategoria="MUDO_TOTAL", confianca=0.7, resumo=resumo,
+                             transcricao="", motor="openai", uso=uso, alucinacoes_removidas=removidas)
     texto = texto or ""
     lados = turnos_do_texto(texto)
 
@@ -304,6 +353,7 @@ def classificar_openai(audio_path: str | None, nome: str | None, tel: str | None
         evidencia=res.evidencia, sentimento_cliente=res.sentimento_cliente, transcricao=texto,
         pedido_nao_ligar=bool(getattr(res, "pedido_nao_ligar", False)),
         turnos=getattr(res, "turnos", None) or lados, motor="openai", uso=uso, por_canal=bool(lados),
+        alucinacoes_removidas=removidas,
     )
     if not valid(out.categoria, out.subcategoria):
         out.categoria, out.subcategoria, out.confianca = "INDETERMINADO", "SEM_DADOS", min(out.confianca, 0.3)

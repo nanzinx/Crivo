@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 
 
 def agora() -> datetime:
     """Horário local do servidor (mesma referência das datas do Argus). Configure TZ=America/Sao_Paulo."""
     return datetime.now()
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -152,3 +152,38 @@ class Tabulacao(Base):
     confirmada: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Alerta(Base):
+    """Alerta de negócio (operador, tronco, LGPD) ou de sistema. Fica aberto enquanto a condição durar."""
+
+    __tablename__ = "alertas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chave: Mapped[str] = mapped_column(String(160), index=True)  # identifica a condição (ex.: "operador:Ana")
+    tipo: Mapped[str] = mapped_column(String(30))  # operador | tronco | nao_ligar | sistema
+    nivel: Mapped[str] = mapped_column(String(10))  # critico | atencao
+    titulo: Mapped[str] = mapped_column(String(160))
+    mensagem: Mapped[str] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(String(500))  # caminho no painel com os filtros do caso
+    valor: Mapped[float | None] = mapped_column(Float)
+    aberto_em: Mapped[datetime] = mapped_column(DateTime, default=agora, index=True)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    resolvido_em: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    notificado_em: Mapped[datetime | None] = mapped_column(DateTime)
+    reconhecido_por: Mapped[str | None] = mapped_column(String(80))
+    reconhecido_em: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Relatorio(Base):
+    """Relatório diário (um por dia; gerar de novo substitui)."""
+
+    __tablename__ = "relatorios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    gerado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    dados: Mapped[dict] = mapped_column(JSON)
+    texto: Mapped[str] = mapped_column(Text)
+    enviado_em: Mapped[datetime | None] = mapped_column(DateTime)
+    envio_detalhe: Mapped[str | None] = mapped_column(Text)

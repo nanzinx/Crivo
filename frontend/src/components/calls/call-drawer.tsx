@@ -322,6 +322,7 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
                       ["Lead", c.nr_lead],
                       ["Tabulação normalizada", c.tabulacao_normalizada ? catLabel(c.tabulacao_normalizada) : null],
                       ["Analisada por", c.motor === "local" ? "Análise local (sem IA)" : c.motor === "openai" ? "IA" : c.motor],
+                      ["Alucinações removidas", (c.metricas_acusticas?.alucinacoes_removidas as number | undefined) ?? null],
                       ["Fala detectada", c.fala_segundos != null ? `${c.fala_segundos.toLocaleString("pt-BR")}s` : null],
                       ["Custo de IA", c.custo_usd ? fmtUsd(c.custo_usd) : c.motor === "local" ? "US$ 0 (sem IA)" : null],
                       ["Origem", c.origem],

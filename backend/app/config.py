@@ -50,6 +50,32 @@ class Settings(BaseSettings):
     # Mede a IA sem viés: se só os casos duvidosos fossem revisados, a acurácia pareceria pior do que é.
     amostra_qualidade_pct: float = 2
 
+    # ----- Alertas automáticos (avaliados a cada ALERTA_INTERVALO_MINUTOS) -----
+    alerta_intervalo_minutos: int = 15
+    alerta_operador_horas: int = 24  # janela analisada por operador
+    alerta_operador_min_ligacoes: int = 20  # menos que isso: amostra pequena demais para acusar
+    alerta_operador_taxa: float = 20  # % de divergência que gera alerta (atenção)
+    alerta_operador_altas: int = 5  # divergências de gravidade alta que tornam o alerta crítico
+    alerta_tronco_horas: int = 3
+    alerta_tronco_min_ligacoes: int = 20
+    alerta_tronco_mudas_pct: float = 40  # % de ligações mudas no tronco (atenção; crítico a partir de 70%)
+    alerta_renotificar_horas: int = 6  # não repete a notificação do mesmo alerta antes disso
+
+    # ----- Relatório diário -----
+    relatorio_hora: int = 19  # gera e envia o relatório do dia a partir desta hora
+    relatorio_dias: str = "0-5"  # dias da semana (0 = segunda ... 6 = domingo)
+
+    # ----- Notificações (alertas e relatório). Sem configuração: só aparecem no painel -----
+    notificar_webhook_url: str = ""  # Slack, Microsoft Teams ou Google Chat (webhook de entrada)
+    smtp_host: str = ""
+    smtp_porta: int = 587
+    smtp_usuario: str = ""
+    smtp_senha: str = ""
+    smtp_tls: bool = True
+    smtp_remetente: str = ""
+    notificar_emails: str = ""  # destinatários, separados por vírgula
+    painel_url: str = ""  # endereço do painel, para os links nas mensagens (ex.: http://crivo.empresa:3000)
+
     database_url: str = f"sqlite:///{(DATA / 'crivo.db').as_posix()}"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

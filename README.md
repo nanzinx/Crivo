@@ -16,7 +16,7 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-123%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-145%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -24,6 +24,7 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
 <a href="#%EF%B8%8F-configuração">Configuração</a> ·
 <a href="#%EF%B8%8F-modelo-de-tabulação">Modelo de tabulação</a> ·
 <a href="#-qualidade-da-ia">Qualidade da IA</a> ·
+<a href="#-alertas-e-relatório-diário">Alertas</a> ·
 <a href="#-custo-de-ia">Custo de IA</a> ·
 <a href="#-api">API</a> ·
 <a href="#%EF%B8%8F-roadmap">Roadmap</a>
@@ -125,12 +126,28 @@ Além dos casos duvidosos, uma amostra aleatória (`AMOSTRA_QUALIDADE_PCT`) entr
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 🔔 Alertas automáticos
+Operador com muita divergência, pico de ligações mudas num tronco e pedido de "não ligar" sem registro. Os alertas abrem e se resolvem sozinhos e chegam por webhook (Slack, Teams, Google Chat) ou e-mail.
+
+</td>
+<td valign="top">
+
+### 📨 Relatório diário
+No fim do expediente, um resumo do dia: divergência por gravidade, operadores, mudas, LGPD, fila de revisão, acerto da IA e custo, em texto e em e-mail HTML.
+
+</td>
+</tr>
 </table>
 
 <div align="center">
 <img src="docs/img/modelo-tabulacao.png" alt="Modelo de tabulação" width="100%" />
 <br/><br/>
 <img src="docs/img/qualidade-ia.png" alt="Qualidade da IA" width="100%" />
+<br/><br/>
+<img src="docs/img/alertas.png" alt="Alertas e relatórios" width="100%" />
 <br/><br/>
 <img src="docs/img/matriz-operadores.png" alt="Matriz de contraste e ranking de operadores" width="100%" />
 <br/><br/>
@@ -348,6 +365,43 @@ O pedido só conta contra o operador se existir no Argus uma tabulação marcada
 
 ---
 
+## 🔔 Alertas e relatório diário
+
+A cada `ALERTA_INTERVALO_MINUTOS` (15), o backend avalia as regras abaixo. Um alerta fica **aberto** enquanto a condição durar e é **resolvido sozinho** quando ela some. A tela *Alertas e relatórios* mostra os abertos, o histórico e quem assumiu cada um.
+
+| Regra | Quando abre (padrões) |
+|---|---|
+| Operador com divergência alta | 20%+ de divergência em 24h, com no mínimo 20 ligações qualificadas. **Crítico** com 5+ divergências de gravidade alta |
+| Pico de mudas num tronco | 40%+ de ligações mudas em 3h (mínimo de 20) e 1,5× acima dos outros troncos. **Crítico** a partir de 70% |
+| Pedido de não ligar sem registro | Qualquer caso nas últimas 24h (LGPD) |
+| Falha crítica do sistema | Alertas críticos da tela Saúde do sistema (integração falhando, teto de IA) |
+
+Todos os limites são ajustáveis no `.env` (`ALERTA_*`). A notificação sai quando o alerta abre ou piora para crítico, e não se repete antes de `ALERTA_RENOTIFICAR_HORAS` (6).
+
+**Relatório diário:** gerado e enviado sozinho a partir de `RELATORIO_HORA` (19h), nos dias de `RELATORIO_DIAS` (`0-5` = segunda a sábado). Também pode ser gerado e enviado pela tela.
+
+**Para onde vai.** Sem nenhum canal configurado, tudo fica só no painel. Os canais:
+
+| Canal | Variáveis |
+|---|---|
+| Webhook (Slack, Microsoft Teams ou Google Chat) | `NOTIFICAR_WEBHOOK_URL` |
+| E-mail (SMTP) | `SMTP_HOST`, `SMTP_PORTA`, `SMTP_USUARIO`, `SMTP_SENHA`, `SMTP_TLS`, `SMTP_REMETENTE`, `NOTIFICAR_EMAILS` |
+| Links nas mensagens | `PAINEL_URL` (ex.: `http://crivo.empresa:3000`) |
+
+Use o botão **Testar** da tela para conferir o envio.
+
+> [!CAUTION]
+> A URL do webhook e a senha do SMTP são credenciais: ficam só no `.env` do servidor, nunca no repositório.
+
+### Alucinações do Whisper
+
+Em trechos de silêncio, o Whisper costuma inventar frases de legenda de vídeo ("Legendas pela comunidade Amara.org", "Obrigado por assistir", "Inscreva-se no canal") ou repetir a mesma frase em laço. O Crivo remove essas frases antes da classificação.
+- Se não sobrar fala, a ligação vira *Ligação muda* sem pagar a classificação.
+- A quantidade removida aparece no detalhe da ligação.
+- "Obrigado" sozinho só é removido quando é a transcrição inteira, porque pode ser fala real.
+
+---
+
 ## 💸 Custo de IA
 
 Cerca de 90% do custo é a **transcrição**, cobrada por minuto de áudio; a classificação é a parte barata. O Crivo audita **100% das ligações** e reduz o gasto assim:
@@ -431,6 +485,12 @@ python -m scripts.comparar_transcricao --n 50 --modelos gpt-4o-mini-transcribe,g
 | `POST` / `DELETE` | `/api/v1/calls/{id}/revisao` | Registra / desfaz a revisão humana |
 | `GET` | `/api/v1/qualidade` | Acurácia, matriz de confusão, calibração e discordâncias |
 | `POST` | `/api/v1/qualidade/medir?n=50` | Roda a IA em ligações da escuta manual para comparar (custa) |
+| `GET` | `/api/v1/alertas` | Alertas abertos, resolvidos, regras e canais |
+| `POST` | `/api/v1/alertas/avaliar` | Avalia as regras agora |
+| `POST` | `/api/v1/alertas/{id}/reconhecer` | Marca quem está cuidando do alerta |
+| `GET` / `POST` | `/api/v1/relatorios` · `/api/v1/relatorios/gerar?enviar=true` | Lista / gera (e envia) o relatório do dia |
+| `GET` | `/api/v1/relatorios/{id}/html` | Versão de e-mail do relatório |
+| `POST` | `/api/v1/notificacoes/teste` | Envia uma mensagem de teste pelos canais configurados |
 
 **Filtros** (os mesmos em listagem, exportação e analytics, então cards, gráficos e tabela sempre batem): `data_inicio`, `data_fim`, `categoria`, `subcategoria`, `operador`, `tronco`, `campanha`, `telefone`, `tipo_agente`, `tipo_discagem`, `desligado_por`, `divergencia`, `gravidade`, `nao_ligar`, `revisao` (fila de revisão), `revisado`, `status`, `q`. A listagem aceita `ordenar=gravidade`.
 
@@ -516,10 +576,10 @@ cd frontend && npm run typecheck && npm run build
   - Revisão humana pela tela (confirmar/corrigir), guardando a resposta original da IA.
   - Acurácia, matriz de confusão, precisão/cobertura por categoria e calibração da confiança.
   - Fila de revisão com amostra aleatória; escuta manual como gabarito.
-- [ ] **Semana 4: escuta precisa e alertas.**
-  - Áudio estéreo com as pontas A/B separadas, para diarização real.
+- [x] **Semana 4: escuta precisa e alertas.**
+  - Áudio estéreo com as pontas A/B separadas (feito na etapa 2 de custo).
   - Filtro de alucinações do Whisper no silêncio.
-  - Alertas e relatório diário automáticos.
+  - Alertas automáticos e relatório diário por webhook/e-mail.
 - [ ] **Segurança e operação.**
   - Login.
   - Alembic + PostgreSQL.

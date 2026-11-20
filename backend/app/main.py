@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from .api import calls, qualidade, saude, sync, tabulacoes, webhooks
+from .api import calls, monitoramento, qualidade, saude, sync, tabulacoes, webhooks
 from .config import settings
 from .database import init_db
 from .services import argus_client, sincronizador
@@ -47,14 +47,38 @@ async def _retomar_aguardando():
             log.exception("retomada de ligações aguardando IA")
 
 
+def _ciclo_monitoramento() -> None:
+    """Avalia os alertas e, na hora certa, gera e envia o relatório do dia."""
+    from .database import SessionLocal
+    from .models import agora
+    from .services import alertas, relatorio
+
+    with SessionLocal() as db:
+        alertas.avaliar(db)
+        t = agora()
+        if relatorio.deve_gerar(t, relatorio.ultimo_gerado(db)):
+            relatorio.enviar(db, relatorio.gerar(db, t.date()))
+
+
+async def _monitorar():
+    while True:
+        await asyncio.sleep(max(1, settings.alerta_intervalo_minutos) * 60)
+        try:
+            await asyncio.to_thread(_ciclo_monitoramento)
+        except Exception:  # pragma: no cover
+            log.exception("monitoramento (alertas/relatório)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     worker.start()
     task = asyncio.create_task(_poll_argus()) if settings.argus_token and argus_client.campaign_ids() else None
     retomada = asyncio.create_task(_retomar_aguardando())
+    monitor = asyncio.create_task(_monitorar())
     yield
     retomada.cancel()
+    monitor.cancel()
     if task:
         task.cancel()
 
@@ -67,6 +91,7 @@ app.include_router(sync.router)
 app.include_router(saude.router)
 app.include_router(tabulacoes.router)
 app.include_router(qualidade.router)
+app.include_router(monitoramento.router)
 
 
 @app.get("/health")

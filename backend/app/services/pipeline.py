@@ -240,8 +240,13 @@ def _concluir(db: Session, call: Call, res: "ai_qualifier.Resultado") -> None:
     call.confianca, call.resumo, call.evidencia = res.confianca, res.resumo, res.evidencia
     call.transcricao = res.transcricao or call.transcricao
     call.transcricao_diarizada = [t.model_dump() for t in res.turnos] or None
-    if res.por_canal:  # reatribui o dicionário para o banco perceber a mudança
-        call.metricas_acusticas = {**(call.metricas_acusticas or {}), "transcricao_por_canal": True}
+    extras = {}
+    if res.por_canal:
+        extras["transcricao_por_canal"] = True
+    if res.alucinacoes_removidas:
+        extras["alucinacoes_removidas"] = res.alucinacoes_removidas
+    if extras:  # reatribui o dicionário para o banco perceber a mudança
+        call.metricas_acusticas = {**(call.metricas_acusticas or {}), **extras}
     call.sentimento_cliente = res.sentimento_cliente
     call.motor = res.motor
     call.status, call.erro = "done", None

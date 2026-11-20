@@ -48,7 +48,7 @@ def avaliar(calls: list[Call], modelos: list[str]) -> dict[str, dict]:
             dur = c.duracao_segundos or audio_analyzer.analyze(c.caminho_audio).get("duracao_segundos") or 0
             try:
                 if tratado:
-                    texto, uso, _ = ai_qualifier._transcrever(client, c.caminho_audio, dur, modelo)
+                    texto, uso, *_ = ai_qualifier._transcrever(client, c.caminho_audio, dur, modelo)
                     enviados = sum(u["audio_segundos"] for u in uso)
                 else:
                     texto, enviados = ai_qualifier.transcrever_audio(client, c.caminho_audio, modelo), dur
