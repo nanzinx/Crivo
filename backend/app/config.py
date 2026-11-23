@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     notificar_emails: str = ""  # destinatários, separados por vírgula
     painel_url: str = ""  # endereço do painel, para os links nas mensagens (ex.: http://crivo.empresa:3000)
 
+    # ----- Acesso -----
+    auth_ativo: bool = True  # false só para desenvolvimento local: sem login, todos entram como administrador
+    sessao_horas: int = 12
+    cookie_seguro: bool = False  # true quando o painel estiver atrás de HTTPS
+
     database_url: str = f"sqlite:///{(DATA / 'crivo.db').as_posix()}"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

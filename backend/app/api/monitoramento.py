@@ -1,7 +1,7 @@
 """Alertas automáticos, relatório diário e teste das notificações."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import Alerta, Relatorio, agora
 from ..services import alertas, notificacoes, relatorio
+from .auth import nome_do_usuario
 
 router = APIRouter(prefix="/api/v1", tags=["monitoramento"])
 
@@ -53,18 +54,19 @@ def avaliar(db: Session = Depends(get_db)):
 
 
 class ReconhecerIn(BaseModel):
-    por: str
+    por: str | None = None  # com login ligado, vale o nome do usuário da sessão
 
 
 @router.post("/alertas/{alerta_id}/reconhecer")
-def reconhecer(alerta_id: int, r: ReconhecerIn, db: Session = Depends(get_db)):
+def reconhecer(alerta_id: int, r: ReconhecerIn, request: Request, db: Session = Depends(get_db)):
     """Marca que alguém já está cuidando do alerta (ele continua aberto até a condição sumir)."""
     a = db.get(Alerta, alerta_id)
     if not a:
         raise HTTPException(404, "Alerta não encontrado")
-    if not r.por.strip():
+    por = nome_do_usuario(request) or (r.por or "").strip()
+    if not por:
         raise HTTPException(422, "Informe quem está cuidando do alerta.")
-    a.reconhecido_por, a.reconhecido_em = r.por.strip()[:80], agora()
+    a.reconhecido_por, a.reconhecido_em = por[:80], agora()
     db.commit()
     return alertas.serializar(a)
 

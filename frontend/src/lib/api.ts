@@ -303,7 +303,7 @@ export type TabulacoesResp = {
 
 async function enviarJson<T>(path: string, method: string, body: unknown): Promise<T> {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(await parseError(r));
+  await verificar(r);
   return r.json();
 }
 
@@ -314,6 +314,31 @@ export function qs(params: Record<string, unknown> = {}) {
   }
   const s = u.toString();
   return s ? `?${s}` : "";
+}
+
+export type Usuario = {
+  id: number;
+  email: string;
+  nome: string;
+  papel: "admin" | "supervisor" | "leitura";
+  papel_label: string;
+  ativo: boolean;
+  criado_em?: string | null;
+  ultimo_login_em?: string | null;
+};
+
+export type EstadoAuth = { auth_ativo: boolean; precisa_configurar: boolean; usuario: Usuario | null };
+
+/** Sessão expirou ou não existe: volta para o login, lembrando onde estava. */
+function irParaLogin() {
+  if (typeof window === "undefined" || window.location.pathname.startsWith("/login")) return;
+  const voltar = window.location.pathname + window.location.search;
+  window.location.href = `/login?voltar=${encodeURIComponent(voltar)}`;
+}
+
+async function verificar(r: Response) {
+  if (r.status === 401) irParaLogin();
+  if (!r.ok) throw new Error(await parseError(r));
 }
 
 async function parseError(r: Response) {
@@ -327,17 +352,37 @@ async function parseError(r: Response) {
 
 export async function get<T>(path: string, params: Record<string, unknown> = {}): Promise<T> {
   const r = await fetch(`${path}${qs(params)}`, { cache: "no-store" });
-  if (!r.ok) throw new Error(await parseError(r));
+  await verificar(r);
   return r.json();
 }
 
 export async function post<T>(path: string, params: Record<string, unknown> = {}, body?: BodyInit): Promise<T> {
   const r = await fetch(`${path}${qs(params)}`, { method: "POST", body });
+  await verificar(r);
+  return r.json();
+}
+
+/** Chamadas de login: não redirecionam no 401 (o erro é mostrado no formulário). */
+async function authJson<T>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
   if (!r.ok) throw new Error(await parseError(r));
   return r.json();
 }
 
 export const api = {
+  estadoAuth: async (): Promise<EstadoAuth> => {
+    const r = await fetch("/api/v1/auth/estado", { cache: "no-store" });
+    if (!r.ok) throw new Error(await parseError(r));
+    return r.json();
+  },
+  login: (email: string, senha: string) => authJson<Usuario>("/api/v1/auth/login", { email, senha }),
+  primeiroAcesso: (email: string, nome: string, senha: string) => authJson<Usuario>("/api/v1/auth/primeiro-acesso", { email, nome, senha }),
+  logout: () => authJson<{ ok: boolean }>("/api/v1/auth/logout"),
+  trocarSenha: (atual: string, nova: string) => authJson<{ ok: boolean }>("/api/v1/auth/senha", { atual, nova }),
+  usuarios: () => get<Usuario[]>("/api/v1/usuarios"),
+  criarUsuario: (u: { email: string; nome: string; papel: string; senha: string }) => enviarJson<Usuario>("/api/v1/usuarios", "POST", u),
+  editarUsuario: (id: number, u: Partial<{ nome: string; papel: string; ativo: boolean; senha: string }>) =>
+    enviarJson<Usuario>(`/api/v1/usuarios/${id}`, "PATCH", u),
   alertas: () => get<AlertasResp>("/api/v1/alertas"),
   avaliarAlertas: () => post<{ novos: number; resolvidos: number; abertos: number; notificados: number }>("/api/v1/alertas/avaliar"),
   reconhecerAlerta: (id: number, por: string) => enviarJson<Alerta>(`/api/v1/alertas/${id}/reconhecer`, "POST", { por }),

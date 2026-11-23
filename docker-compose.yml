@@ -1,0 +1,53 @@
+# Crivo: banco + backend + frontend.
+#   cp .env.example .env   (preencha as chaves)
+#   docker compose up -d --build
+# Painel: http://localhost:3000   ·   API/webhook do Argus: http://<servidor>:8000/api/v1/webhooks/argus
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crivo
+      POSTGRES_USER: crivo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-troque-esta-senha}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crivo -d crivo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://crivo:${POSTGRES_PASSWORD:-troque-esta-senha}@db:5432/crivo
+      # Caminhos dentro do container (a pasta ./data do servidor é montada em /srv/data)
+      RECORDINGS_DIR: /srv/data/gravacoes
+      LEGACY_CSV: /srv/data/relatorio_escuta_gravacoes.csv
+      LEGACY_HTML: /srv/data/dashboard_gravacoes.html
+      CRUZAR_CSV: /srv/data/cruzar_dados.csv
+      ARGUS_DOWNLOAD_DIR: /srv/data/argus
+    volumes:
+      - ./data:/srv/data
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000" # o Argus precisa alcançar o webhook
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:8000
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

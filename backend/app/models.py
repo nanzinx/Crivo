@@ -187,3 +187,30 @@ class Relatorio(Base):
     texto: Mapped[str] = mapped_column(Text)
     enviado_em: Mapped[datetime | None] = mapped_column(DateTime)
     envio_detalhe: Mapped[str | None] = mapped_column(Text)
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    nome: Mapped[str] = mapped_column(String(80))
+    senha_hash: Mapped[str] = mapped_column(String(255))
+    papel: Mapped[str] = mapped_column(String(20), default="supervisor")  # admin | supervisor | leitura
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    ultimo_login_em: Mapped[datetime | None] = mapped_column(DateTime)
+    falhas_login: Mapped[int] = mapped_column(Integer, default=0)
+    bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Sessao(Base):
+    """Sessão de login. Só o hash do token fica no banco: um vazamento do banco não dá acesso."""
+
+    __tablename__ = "sessoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    expira_em: Mapped[datetime] = mapped_column(DateTime)

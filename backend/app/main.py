@@ -6,7 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from .api import calls, monitoramento, qualidade, saude, sync, tabulacoes, webhooks
+from fastapi import Depends
+
+from .api import auth, calls, monitoramento, qualidade, saude, sync, tabulacoes, webhooks
 from .config import settings
 from .database import init_db
 from .services import argus_client, sincronizador
@@ -85,13 +87,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crivo", description="Auditoria de ligações: Argus × IA", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_list, allow_methods=["*"], allow_headers=["*"])
-app.include_router(calls.router)
+protegido = [Depends(auth.exigir_login)]  # o webhook do Argus usa segredo próprio; /health fica aberto
+app.include_router(auth.router)
+app.include_router(calls.router, dependencies=protegido)
 app.include_router(webhooks.router)
-app.include_router(sync.router)
-app.include_router(saude.router)
-app.include_router(tabulacoes.router)
-app.include_router(qualidade.router)
-app.include_router(monitoramento.router)
+app.include_router(sync.router, dependencies=protegido)
+app.include_router(saude.router, dependencies=protegido)
+app.include_router(tabulacoes.router, dependencies=protegido)
+app.include_router(qualidade.router, dependencies=protegido)
+app.include_router(monitoramento.router, dependencies=protegido)
 
 
 @app.get("/health")

@@ -2,9 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
+import { KeyRound, LogOut, Users } from "lucide-react";
+import { useAuth } from "@/components/auth-context";
 import { Activity, BellRing, Gauge, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState, type ReactNode } from "react";
 import { PlayerBar } from "@/components/player/player-bar";
@@ -103,7 +105,90 @@ function LiveBadge() {
   );
 }
 
+/** Portaria: sem sessão (com o login ligado), manda para /login; a tela de login não tem menu. */
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { carregando, estado, usuario } = useAuth();
+  const naLogin = pathname.startsWith("/login");
+  const barrado = !carregando && !!estado?.auth_ativo && !usuario;
+  useEffect(() => {
+    if (barrado && !naLogin) router.replace(`/login?voltar=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+  }, [barrado, naLogin, router]);
+
+  if (naLogin) return <>{children}</>;
+  if (carregando || barrado) {
+    return (
+      <div className="grid min-h-dvh place-items-center">
+        <Logo className="h-10 w-10 animate-pulse" />
+      </div>
+    );
+  }
+  return <Chrome>{children}</Chrome>;
+}
+
+function UserMenu({ compacto }: { compacto?: boolean }) {
+  const { usuario, estado, admin, sair } = useAuth();
+  const [aberto, setAberto] = useState(false);
+  const nome = usuario?.nome ?? "Acesso local";
+  const iniciais = nome.split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+        aria-label="Menu da conta"
+        className={cn("flex w-full items-center gap-2.5 rounded-xl text-left transition hover:bg-raised", compacto ? "p-1" : "px-2 py-1.5")}
+      >
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-soft text-[11px] font-bold text-brand-ink">{iniciais}</span>
+        {!compacto && (
+          <span className="min-w-0 leading-tight">
+            <span className="block truncate text-sm font-medium">{nome}</span>
+            <span className="block truncate text-[11px] text-ink-muted">{usuario?.papel_label ?? (estado?.auth_ativo === false ? "Login desligado" : "")}</span>
+          </span>
+        )}
+      </button>
+      <AnimatePresence>
+        {aberto && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setAberto(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: compacto ? -4 : 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className={cn(
+                "card absolute z-50 w-56 p-1.5 text-sm shadow-pop",
+                compacto ? "right-0 top-11" : "bottom-12 left-0",
+              )}
+              onClick={() => setAberto(false)}
+            >
+              {usuario && <div className="truncate px-2.5 py-1.5 text-xs text-ink-muted">{usuario.email}</div>}
+              {usuario && (
+                <Link href="/conta" className="flex items-center gap-2 rounded-lg px-2.5 py-2 hover:bg-raised">
+                  <KeyRound className="h-4 w-4 text-ink-muted" /> Trocar senha
+                </Link>
+              )}
+              {admin && usuario && (
+                <Link href="/usuarios" className="flex items-center gap-2 rounded-lg px-2.5 py-2 hover:bg-raised">
+                  <Users className="h-4 w-4 text-ink-muted" /> Usuários
+                </Link>
+              )}
+              {usuario ? (
+                <button onClick={() => sair()} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-critical hover:bg-critical/10">
+                  <LogOut className="h-4 w-4" /> Sair
+                </button>
+              ) : (
+                <p className="px-2.5 py-2 text-xs text-ink-muted">Login desligado (AUTH_ATIVO=false). Use só em desenvolvimento.</p>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function Chrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { current } = usePlayer();
   const { data: saude } = useQuery({ queryKey: ["saude"], queryFn: api.saude, refetchInterval: 30_000 });
@@ -159,6 +244,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="mt-auto space-y-3">
+          <UserMenu />
           <LiveBadge />
           <ThemeToggle />
         </div>
@@ -173,6 +259,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex items-center gap-1">
           <LiveBadge />
           <ThemeToggle compact />
+          <UserMenu compacto />
         </div>
       </header>
 

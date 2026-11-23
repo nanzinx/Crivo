@@ -3,13 +3,14 @@ import io
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, model_validator
 from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from .auth import nome_do_usuario
 from ..models import Call, Tabulacao
 from ..services import qualidade, tabulacoes
 from ..taxonomy import CATEGORIES, label_cat, label_sub, valid
@@ -284,27 +285,28 @@ def get_call(call_id: int, db: Session = Depends(get_db)):
 class RevisaoIn(BaseModel):
     categoria: str
     subcategoria: str | None = None
-    revisor: str
+    revisor: str | None = None  # com login ligado, vale o nome do usuário da sessão
     observacao: str | None = None
 
     @model_validator(mode="after")
     def _validar(self):
         if not valid(self.categoria, self.subcategoria):
             raise ValueError("Categoria/subcategoria fora da taxonomia.")
-        if not self.revisor.strip():
-            raise ValueError("Informe quem está revisando.")
         return self
 
 
 @router.post("/calls/{call_id}/revisao")
-def revisar(call_id: int, r: RevisaoIn, db: Session = Depends(get_db)):
+def revisar(call_id: int, r: RevisaoIn, request: Request, db: Session = Depends(get_db)):
     """Revisão humana: confirma ou corrige o resultado da IA. Vira o resultado da ligação e o gabarito da medição."""
     c = db.get(Call, call_id)
     if not c:
         raise HTTPException(404, "Ligação não encontrada")
     if c.status != "done" or not c.categoria:
         raise HTTPException(409, "A ligação ainda não foi analisada.")
-    qualidade.revisar(db, c, r.categoria, r.subcategoria, r.revisor, r.observacao)
+    revisor = nome_do_usuario(request) or (r.revisor or "").strip()
+    if not revisor:
+        raise HTTPException(422, "Informe quem está revisando.")
+    qualidade.revisar(db, c, r.categoria, r.subcategoria, revisor, r.observacao)
     db.commit()
     return serialize(c, full=True, confirmadas=_confirmadas(db))
 

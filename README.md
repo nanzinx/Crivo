@@ -16,7 +16,8 @@ do panorama das ligações, medir a qualidade da tabulação e monitorar a opera
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="OpenAI" src="https://img.shields.io/badge/IA-Whisper%20%2B%20GPT-412991?logo=openai&logoColor=white" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-145%20passando-0ca30c" />
+  <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-158%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -213,6 +214,30 @@ flowchart LR
 
 ## 🚀 Começando
 
+### Com Docker (recomendado para o servidor)
+
+Sobe PostgreSQL, backend e frontend juntos:
+
+```bash
+cp .env.example .env
+```
+
+```bash
+mkdir -p data && sudo chown -R 10001 data
+```
+
+```bash
+docker compose up -d --build
+```
+
+- **Painel:** http://localhost:3000. No primeiro acesso, a tela pede para criar o administrador.
+- **Webhook do Argus:** `http://<servidor>:8000/api/v1/webhooks/argus`.
+- **Pasta `./data`:** guarda gravações, relatórios e downloads do Argus, e é montada dentro do container. O `chown` dá acesso de escrita ao usuário sem privilégios do container.
+- **Senha do banco:** defina `POSTGRES_PASSWORD` no ambiente ou no `.env` antes de subir (o padrão é só para teste).
+- **HTTPS:** coloque o painel atrás de um proxy com HTTPS e use `COOKIE_SEGURO=true`.
+
+### Sem Docker (desenvolvimento)
+
 ### Pré-requisitos
 - **Python 3.11+**
 - **Node.js 20+**
@@ -279,6 +304,10 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
 | `LEGACY_CSV` / `LEGACY_HTML` | Escuta manual anterior | `./data/…` |
 | `CORS_ORIGINS` | Origens liberadas no CORS | `http://localhost:3000,…` |
+| `AUTH_ATIVO` | Exige login no painel e na API | `true` |
+| `SESSAO_HORAS` | Duração da sessão | `12` |
+| `COOKIE_SEGURO` | Cookie só por HTTPS (use `true` em produção com HTTPS) | `false` |
+| `POSTGRES_PASSWORD` | Senha do PostgreSQL do `docker compose` | — |
 | `ALERTA_WEBHOOK_MINUTOS` | Silêncio de webhook que gera alerta | `30` |
 | `HORARIO_COMERCIAL` | Janela dos alertas de webhook (seg–sáb) | `8-20` |
 
@@ -297,6 +326,36 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | **Recuperar período** | Tela *Saúde do sistema* → *Recuperar período*, ou `POST /api/v1/sync/argus?data_inicio=…&data_fim=…` (janelas de 7 dias). |
 | **Acervo local** | Grave em `RECORDINGS_DIR` arquivos no padrão `YYYY-MM-DD_HHMMSS_nr{lead}_id{idLigacao}_{telefone}_{nome}.mp3` e clique em *Importar acervo local*. |
 | **Relatório da discadora** | Arraste o CSV em *Saúde do sistema* → *Cruzar relatório da discadora*. O arquivo é lido **pelo nome das colunas**, em UTF-8 ou Windows-1252. |
+
+---
+
+## 🔐 Acesso
+
+O painel exige login (`AUTH_ATIVO=true`, padrão).
+
+**Primeiro acesso.** Com o banco vazio, a tela de login pede para criar o administrador. Depois, ele cadastra a equipe em *Usuários* (menu da conta).
+
+| Perfil | Pode |
+|---|---|
+| **Administrador** | Tudo, inclusive gerenciar usuários |
+| **Supervisor** | Consultar, revisar ligações, confirmar tabulações, importar e sincronizar |
+| **Só leitura** | Apenas consultar |
+
+**Como funciona:**
+- **Senhas:** guardadas com scrypt e sal.
+- **Sessão:** cookie `HttpOnly`, válido por `SESSAO_HORAS` (12). O banco guarda só o hash do token.
+- **Bloqueio:** 5 senhas erradas seguidas bloqueiam o login por 5 minutos.
+- **Assinatura das ações:** a revisão de ligações e o "assumir alerta" ficam no nome de quem está logado.
+- **Esqueceu a senha:** um administrador redefine em *Usuários*.
+
+**Sem login:**
+- O `/health` fica aberto, para monitoramento.
+- O webhook do Argus é protegido só pelo `ARGUS_WEBHOOK_SECRET`.
+
+**Scripts e integrações** podem usar o token devolvido por `POST /api/v1/auth/login` no cabeçalho `Authorization: Bearer <token>`.
+
+> [!WARNING]
+> `AUTH_ATIVO=false` desliga o login e todos entram como administrador. Use só no computador de desenvolvimento.
 
 ---
 
@@ -540,6 +599,14 @@ crivo/
 cd backend && python -m pytest
 ```
 
+Para rodar a mesma suíte num PostgreSQL (o banco indicado é zerado):
+
+```bash
+cd backend && TEST_DATABASE_URL=postgresql+psycopg://usuario:senha@localhost/crivo_teste python -m pytest
+```
+
+O CI (GitHub Actions) roda os testes em SQLite e PostgreSQL, o build do frontend e o build das imagens Docker a cada envio.
+
 ```bash
 cd frontend && npm run typecheck && npm run build
 ```
@@ -580,10 +647,13 @@ cd frontend && npm run typecheck && npm run build
   - Áudio estéreo com as pontas A/B separadas (feito na etapa 2 de custo).
   - Filtro de alucinações do Whisper no silêncio.
   - Alertas automáticos e relatório diário por webhook/e-mail.
-- [ ] **Segurança e operação.**
-  - Login.
-  - Alembic + PostgreSQL.
-  - Docker e CI.
-  - Política de retenção de áudio.
+- [x] **Segurança e operação.**
+  - Login com perfis, bloqueio por tentativas e gestão de usuários.
+  - PostgreSQL testado (suíte inteira) e `docker compose` com banco, backend e frontend.
+  - CI no GitHub Actions.
+- [ ] **Próximos.**
+  - Política de retenção de áudio e transcrições (LGPD).
+  - Alembic, quando houver a primeira mudança de banco que não seja só "adicionar coluna" (hoje as colunas novas são criadas sozinhas, em SQLite e PostgreSQL).
+  - Registro de auditoria de quem alterou o quê.
 
 <div align="center"><sub>Feito para enxergar o que cada ligação realmente foi.</sub></div>

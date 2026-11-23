@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/auth-context";
 import { Button, Card, Empty, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, relatorioHtmlUrl, type Alerta, type Relatorio } from "@/lib/api";
 import { cn, fmtAgo, fmtDateTime, fmtDay, fmtInt, fmtPct, fmtUsd } from "@/lib/utils";
@@ -195,11 +196,12 @@ export default function AlertasPage() {
 
 function AlertaCard({ a }: { a: Alerta }) {
   const qc = useQueryClient();
+  const { usuario, podeEditar } = useAuth();
   const crit = a.nivel === "critico";
   const Icon = crit ? AlertOctagon : AlertTriangle;
   const reconhecer = useMutation({
     mutationFn: () => {
-      const nome = lerNome() || window.prompt("Seu nome (quem está cuidando deste alerta):") || "";
+      const nome = usuario?.nome || lerNome() || window.prompt("Seu nome (quem está cuidando deste alerta):") || "";
       if (!nome.trim()) throw new Error("Informe seu nome para assumir o alerta.");
       return api.reconhecerAlerta(a.id, nome);
     },
@@ -226,7 +228,7 @@ function AlertaCard({ a }: { a: Alerta }) {
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
-        {!a.reconhecido_por && (
+        {!a.reconhecido_por && podeEditar && (
           <Button size="sm" variant="ghost" onClick={() => reconhecer.mutate()} loading={reconhecer.isPending} title="Avisar que você está cuidando">
             <Hand className="h-3.5 w-3.5" /> Assumir
           </Button>

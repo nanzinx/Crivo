@@ -17,6 +17,7 @@ import {
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/auth-context";
 import { Button, Card, Empty, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, exportTabulacoesUrl, type RegraTabulacao, type Tabulacao, type TabulacoesResp, type TipoTabulacao } from "@/lib/api";
 import { CATEGORIAS, catColor, cn, fmtInt, fmtPct } from "@/lib/utils";
@@ -215,6 +216,7 @@ const TIPO_AJUDA: Record<TipoTabulacao, string> = {
 
 function Editor({ t, opcoes }: { t: Tabulacao; opcoes: TabulacoesResp["opcoes"] }) {
   const qc = useQueryClient();
+  const { podeEditar } = useAuth();
   const inicial: RegraTabulacao = { tipo: t.tipo, categorias: t.categorias, subcategoria: t.subcategoria, nao_ligar: t.nao_ligar };
   const [r, setR] = useState<RegraTabulacao>(inicial);
   const alterado = JSON.stringify(r) !== JSON.stringify(inicial);
@@ -284,7 +286,8 @@ function Editor({ t, opcoes }: { t: Tabulacao; opcoes: TabulacoesResp["opcoes"] 
           <Button
             variant={alterado || !t.confirmada ? "primary" : "outline"}
             size="sm"
-            disabled={invalido || (!alterado && t.confirmada)}
+            disabled={!podeEditar || invalido || (!alterado && t.confirmada)}
+            title={podeEditar ? undefined : "Seu perfil é só de leitura"}
             loading={salvar.isPending}
             onClick={() => salvar.mutate()}
           >

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, ClipboardCheck, Pencil, Undo2, UserCheck, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/auth-context";
 import { Button, CategoryBadge } from "@/components/ui/primitives";
 import { api, type Call } from "@/lib/api";
 import { CATEGORIAS, catColor, catLabel, cn, fmtDateTime } from "@/lib/utils";
@@ -35,8 +36,9 @@ export function RevisaoPanel({ c }: { c: Call }) {
   const [cat, setCat] = useState(c.categoria ?? "");
   const [sub, setSub] = useState<string>(c.subcategoria ?? "");
   const [obs, setObs] = useState("");
+  const { usuario, podeEditar } = useAuth();
   const [revisor, setRevisor] = useState("");
-  useEffect(() => setRevisor(lerRevisor()), []);
+  useEffect(() => setRevisor(usuario?.nome ?? lerRevisor()), [usuario]);
 
   const pronto = (r: Call, msg: string) => {
     qc.setQueryData(["call", c.id], r);
@@ -59,6 +61,7 @@ export function RevisaoPanel({ c }: { c: Call }) {
   });
 
   if (c.status !== "done" || !c.categoria) return null;
+  if (!podeEditar && !c.revisado) return null;
   const semNome = !revisor.trim();
   const subs = cat && tax?.[cat] ? Object.entries(tax[cat].subs) : [];
 
@@ -85,7 +88,7 @@ export function RevisaoPanel({ c }: { c: Call }) {
             )}
             {c.revisao_observacao && <p className="italic text-ink-2">“{c.revisao_observacao}”</p>}
           </div>
-          <div className="flex shrink-0 gap-1">
+          <div className={cn("flex shrink-0 gap-1", !podeEditar && "hidden")}>
             <Button size="sm" variant="ghost" onClick={() => setEditando(true)} title="Alterar a revisão">
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -106,6 +109,9 @@ export function RevisaoPanel({ c }: { c: Call }) {
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">
           <ClipboardCheck className="h-4 w-4 text-ink-muted" /> Revisão humana
         </h3>
+        {usuario ? (
+          <span className="text-xs text-ink-muted">como {usuario.nome}</span>
+        ) : (
         <input
           value={revisor}
           onChange={(e) => setRevisor(e.target.value)}
@@ -116,6 +122,7 @@ export function RevisaoPanel({ c }: { c: Call }) {
             semNome ? "border-warn" : "border-line",
           )}
         />
+        )}
       </div>
 
       <AnimatePresence initial={false} mode="wait">
