@@ -1,4 +1,4 @@
-"""Semana 4: filtro de alucinações do Whisper, alertas automáticos, relatório diário e notificações."""
+"""Semana 4: alertas automáticos, relatório diário e notificações."""
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -7,48 +7,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Alerta, Call, Relatorio, agora
-from app.services import ai_qualifier, alertas, notificacoes, pipeline, relatorio
-from helpers import IAFalsa, fala, wav
-
-
-# --------------------------------------------------------------------------- alucinações do Whisper
-@pytest.mark.parametrize("texto,esperado", [
-    ("Legendas pela comunidade Amara.org", ""),
-    ("Obrigado.", ""),
-    ("Obrigada por assistir! Inscreva-se no canal.", ""),
-    ("Alô? Bom dia, falo com a dona Maria? Legendas pela comunidade Amara.org",
-     "Alô? Bom dia, falo com a dona Maria?"),
-    ("não tenho interesse, obrigado", "não tenho interesse, obrigado"),  # "obrigado" no meio da fala real fica
-    ("Tchau. Tchau. Tchau. Tchau. Tchau.", "Tchau."),  # repetição em laço
-])
-def test_limpar_alucinacoes(texto, esperado):
-    assert ai_qualifier.limpar_alucinacoes(texto)[0] == esperado
-
-
-def test_transcricao_so_com_alucinacao_vira_muda_sem_pagar_classificacao(tmp_path, monkeypatch):
-    ia = IAFalsa(monkeypatch)
-    ia.fala_por_arquivo = lambda p: "Legendas pela comunidade Amara.org"
-    with SessionLocal() as db:
-        c = Call(id_ligacao=810001, status="pending", caminho_audio=wav(tmp_path / "h.wav", [fala(20, 1, 6)]))
-        db.add(c)
-        db.commit()
-        pipeline.qualificar_call(db, c)
-        assert (c.status, c.categoria, c.subcategoria) == ("done", "LIGACAO_MUDA", "MUDO_TOTAL")
-        assert ia.classificacoes == 0 and ia.transcricoes == 1
-        assert c.metricas_acusticas["alucinacoes_removidas"] == 1
-        assert "alucina" in c.resumo.lower()
-
-
-def test_alucinacao_parcial_e_removida_antes_da_classificacao(tmp_path, monkeypatch):
-    ia = IAFalsa(monkeypatch)
-    ia.fala_por_arquivo = lambda p: "Não tenho interesse. Obrigado por assistir!"
-    with SessionLocal() as db:
-        c = Call(id_ligacao=810002, status="pending", caminho_audio=wav(tmp_path / "h2.wav", [fala(20, 1, 6)]))
-        db.add(c)
-        db.commit()
-        pipeline.qualificar_call(db, c)
-        assert ia.textos[-1] == "Não tenho interesse."
-        assert c.transcricao == "Não tenho interesse."
+from app.services import alertas, notificacoes, relatorio
 
 
 # --------------------------------------------------------------------------- notificações
@@ -121,8 +80,7 @@ def capturar(monkeypatch):
 
 def _calls(db, n, base, agora_, **kw):
     for i in range(n):
-        db.add(Call(id_ligacao=base + i, status="done", data_ligacao=agora_ - timedelta(minutes=30 + i),
-                    confianca=0.9, **kw))
+        db.add(Call(id_ligacao=base + i, status="avaliada", data_ligacao=agora_ - timedelta(minutes=30 + i), **kw))
     db.commit()
 
 
@@ -197,8 +155,8 @@ def test_relatorio_do_dia(client, capturar):
     with SessionLocal() as db:
         base = datetime(2026, 3, 10, 10)
         for i in range(6):
-            db.add(Call(id_ligacao=830000 + i, status="done", data_ligacao=base + timedelta(minutes=i),
-                        operador_nome="Op Relatório", categoria="SEM_INTERESSE", confianca=0.9,
+            db.add(Call(id_ligacao=830000 + i, status="avaliada", data_ligacao=base + timedelta(minutes=i),
+                        operador_nome="Op Relatório", categoria="SEM_INTERESSE",
                         tabulacao_operador="CLIENTE NÃO TEM INTERESSE", tronco="T1",
                         divergencia_tabulacao=i < 2, divergencia_gravidade="alta" if i < 2 else None))
         db.commit()

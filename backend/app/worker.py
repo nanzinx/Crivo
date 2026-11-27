@@ -1,13 +1,14 @@
-"""Fila em processo (thread) para baixar áudio + qualificar. Troque por Celery/Redis ao escalar."""
+"""Fila em processo (thread) para baixar a gravação e pôr a ligação na fila da monitora.
+
+Troque por Celery/Redis ao escalar.
+"""
 import logging
 import queue
 import threading
 
-from sqlalchemy import select
-
 from .database import SessionLocal
 from .models import Call
-from .services import argus_client, pipeline, status
+from .services import pipeline
 
 log = logging.getLogger("worker")
 _q: "queue.Queue[tuple[int, bool]]" = queue.Queue()
@@ -16,28 +17,13 @@ _lock = threading.Lock()
 
 
 def enqueue(call_id: int, force: bool = False) -> bool:
+    """`force`: baixa a gravação de novo mesmo que ela já exista."""
     with _lock:
         if call_id in _queued:
             return False
         _queued.add(call_id)
     _q.put((call_id, force))
     return True
-
-
-def enqueue_pending(limit: int | None = None, include_awaiting: bool = True) -> int:
-    statuses = ["pending", "error"] + (["awaiting_ai"] if include_awaiting else [])
-    with SessionLocal() as db:
-        stmt = select(Call.id).where(Call.status.in_(statuses)).order_by(Call.data_ligacao)
-        if limit:
-            stmt = stmt.limit(limit)
-        return sum(enqueue(i) for i in db.scalars(stmt))
-
-
-def enqueue_aguardando() -> int:
-    """Reenfileira só as ligações que esperam a IA (ex.: seguradas pelo teto diário)."""
-    with SessionLocal() as db:
-        ids = db.scalars(select(Call.id).where(Call.status == "awaiting_ai").order_by(Call.data_ligacao)).all()
-    return sum(enqueue(i) for i in ids)
 
 
 def queue_size() -> int:
@@ -50,19 +36,8 @@ def _run():
         try:
             with SessionLocal() as db:
                 call = db.get(Call, cid)
-                if not call:
-                    continue
-                if not call.caminho_audio and call.origem == "argus" and call.id_campanha and call.id_ligacao:
-                    try:
-                        call.caminho_audio = str(argus_client.download_gravacao(call.id_campanha, call.id_ligacao))
-                        db.commit()
-                        status.registrar(status.DOWNLOAD, True, f"Ligação #{call.id}")
-                    except Exception as e:
-                        call.status, call.erro = "error", f"download: {str(e)[:300]}"
-                        db.commit()
-                        status.registrar(status.DOWNLOAD, False, f"Ligação #{call.id}: {e}")
-                        continue
-                pipeline.qualificar_call(db, call, force=force)
+                if call:
+                    pipeline.preparar_call(db, call, baixar_de_novo=force)
         except Exception:
             log.exception("falha ao processar call %s", cid)
         finally:

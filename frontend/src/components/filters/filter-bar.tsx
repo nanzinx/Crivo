@@ -113,7 +113,7 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
             className="overflow-hidden"
           >
             <div className="card grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-              <Select label="Categoria IA" value={f.categoria ?? ""} onChange={(e) => setFilters({ categoria: e.target.value, subcategoria: "" })}>
+              <Select label="Resultado (monitoria)" value={f.categoria ?? ""} onChange={(e) => setFilters({ categoria: e.target.value, subcategoria: "" })}>
                 <option value="">Todas</option>
                 {CATEGORIAS.map((c) => (
                   <option key={c} value={c}>
@@ -169,7 +169,7 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
                   </option>
                 ))}
               </Select>
-              <Select label="Tabulação × IA" value={f.divergencia ?? ""} onChange={(e) => setFilters({ divergencia: e.target.value })}>
+              <Select label="Tabulação × monitoria" value={f.divergencia ?? ""} onChange={(e) => setFilters({ divergencia: e.target.value })}>
                 <option value="">Todas</option>
                 <option value="true">Divergentes</option>
                 <option value="false">Coerentes</option>
@@ -185,12 +185,12 @@ export function FilterBar({ showStatus = false }: { showStatus?: boolean }) {
                 <option value="true">Sim (LGPD)</option>
                 <option value="false">Não</option>
               </Select>
-              <Select label="Revisão humana" value={f.revisao ?? ""} onChange={(e) => setFilters({ revisao: e.target.value })}>
+              <Select label="Fila da monitoria" value={f.revisao ?? ""} onChange={(e) => setFilters({ revisao: e.target.value })}>
                 <option value="">Todas</option>
-                <option value="true">Precisa de revisão</option>
+                <option value="true">Aguardando avaliação</option>
                 <option value="false">Sem pendência</option>
               </Select>
-              <Select label="Revisada por humano" value={f.revisado ?? ""} onChange={(e) => setFilters({ revisado: e.target.value })}>
+              <Select label="Avaliada pela monitoria" value={f.revisado ?? ""} onChange={(e) => setFilters({ revisado: e.target.value })}>
                 <option value="">Todas</option>
                 <option value="true">Sim</option>
                 <option value="false">Não</option>

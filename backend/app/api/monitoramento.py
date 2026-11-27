@@ -20,7 +20,7 @@ def _regras() -> list[dict]:
     s = settings
     return [
         {"tipo": "operador", "nome": alertas.REGRAS["operador"],
-         "descricao": f"{s.alerta_operador_taxa:g}% ou mais de divergência em {s.alerta_operador_horas}h (mínimo de "
+         "descricao": f"{s.alerta_operador_taxa:g}% ou mais de divergência (entre as ligações avaliadas) em {s.alerta_operador_horas}h (mínimo de "
                       f"{s.alerta_operador_min_ligacoes} ligações). Crítico com {s.alerta_operador_altas}+ divergências altas."},
         {"tipo": "tronco", "nome": alertas.REGRAS["tronco"],
          "descricao": f"{s.alerta_tronco_mudas_pct:g}% ou mais de ligações mudas em {s.alerta_tronco_horas}h (mínimo de "
@@ -28,7 +28,7 @@ def _regras() -> list[dict]:
         {"tipo": "nao_ligar", "nome": alertas.REGRAS["nao_ligar"],
          "descricao": "Cliente pediu para não ligar e a tabulação não registrou, nas últimas 24h."},
         {"tipo": "sistema", "nome": alertas.REGRAS["sistema"],
-         "descricao": "Alertas críticos da Saúde do sistema (integração falhando, teto de IA atingido...)."},
+         "descricao": "Alertas críticos da Saúde do sistema (integração falhando...)."},
     ]
 
 

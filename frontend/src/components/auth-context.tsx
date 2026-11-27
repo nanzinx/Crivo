@@ -8,8 +8,10 @@ type Auth = {
   carregando: boolean;
   estado: EstadoAuth | undefined;
   usuario: Usuario | null;
-  /** Pode alterar dados (revisar, confirmar tabulação, importar...). Falso para o perfil "só leitura". */
+  /** Pode alterar dados (confirmar tabulação, importar, alertas...). Falso para o perfil "só leitura". */
   podeEditar: boolean;
+  /** Registra o resultado das ligações (monitora de qualidade ou administrador). */
+  podeAvaliar: boolean;
   admin: boolean;
   sair: () => Promise<void>;
 };
@@ -26,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     estado: data,
     usuario,
     podeEditar: semLogin || (!!usuario && usuario.papel !== "leitura"),
+    podeAvaliar: semLogin || usuario?.papel === "monitora" || usuario?.papel === "admin",
     admin: semLogin || usuario?.papel === "admin",
     sair: async () => {
       await api.logout().catch(() => undefined);

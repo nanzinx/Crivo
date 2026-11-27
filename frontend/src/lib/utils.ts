@@ -33,10 +33,12 @@ export const catColor = (c?: string | null) => (c && CAT_LABEL[c] ? `var(--cat-$
 export const catLabel = (c?: string | null) => (c ? CAT_LABEL[c] ?? c : "Pendente");
 
 export const STATUS_LABEL: Record<string, string> = {
-  done: "Qualificada",
-  pending: "Pendente",
-  awaiting_ai: "Aguardando IA",
-  error: "Erro",
+  pendente: "Baixando gravação",
+  pendente_avaliacao: "Aguardando avaliação",
+  em_avaliacao: "Em avaliação",
+  avaliada: "Avaliada",
+  nao_avaliavel: "Não avaliável",
+  erro: "Erro",
 };
 
 export const DESLIG_LABEL: Record<string, string> = { CLIENTE: "Cliente", OPERADOR: "Operador", OUTRO: "Outro" };

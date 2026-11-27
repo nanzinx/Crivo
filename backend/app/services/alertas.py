@@ -4,7 +4,9 @@ Regras (limites no .env, ver config.py):
 - operador: taxa de divergência alta numa janela (crítico com muitas divergências de gravidade alta);
 - tronco: pico de ligações mudas num tronco, bem acima dos outros (sinal de problema na linha);
 - nao_ligar: pedido de "não ligar" sem registro na tabulação (LGPD);
-- sistema: alertas CRÍTICOS da saúde do sistema (integração caída, teto de IA...).
+- sistema: alertas CRÍTICOS da saúde do sistema (integração caída...).
+
+Só contam as ligações avaliadas pela monitora (status "avaliada"): é delas que vem o resultado.
 
 Um alerta fica aberto enquanto a condição durar e é resolvido sozinho quando ela some.
 A notificação sai quando o alerta abre (ou piora para crítico), no máximo a cada ALERTA_RENOTIFICAR_HORAS.
@@ -18,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Alerta, Call, agora
-from . import notificacoes
+from . import avaliacoes, notificacoes
 
 log = logging.getLogger("alertas")
 
@@ -45,7 +47,7 @@ def _pct(a: float, b: float) -> float:
 
 def _condicoes(db: Session, t: datetime) -> list[dict]:
     out: list[dict] = []
-    done = Call.status == "done"
+    avaliada = Call.status == avaliacoes.AVALIADA
 
     # ---- operadores
     ini = t - timedelta(hours=settings.alerta_operador_horas)
@@ -53,7 +55,7 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
         select(Call.operador_nome, func.count(Call.id),
                func.sum(case((Call.divergencia_tabulacao.is_(True), 1), else_=0)),
                func.sum(case((Call.divergencia_gravidade == "alta", 1), else_=0)))
-        .where(done, Call.operador_nome.is_not(None), Call.data_ligacao >= ini, Call.data_ligacao <= t)
+        .where(avaliada, Call.operador_nome.is_not(None), Call.data_ligacao >= ini, Call.data_ligacao <= t)
         .group_by(Call.operador_nome)
     ).all()
     for nome, n, div, altas in rows:
@@ -67,7 +69,7 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
         out.append({
             "chave": f"operador:{nome}", "tipo": "operador", "nivel": "critico" if critico else "atencao",
             "titulo": f"Divergência alta: {nome}", "valor": round(taxa, 1),
-            "mensagem": (f"{nome}: {div} de {n} ligações qualificadas divergentes ({taxa:.0f}%), {altas} de gravidade "
+            "mensagem": (f"{nome}: {div} de {n} ligações avaliadas divergentes ({taxa:.0f}%), {altas} de gravidade "
                          f"alta, {_janela(settings.alerta_operador_horas)}."),
             "link": _link("/ligacoes", operador=nome, divergencia="true", data_inicio=ini.date().isoformat()),
         })
@@ -76,7 +78,7 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
     ini = t - timedelta(hours=settings.alerta_tronco_horas)
     rows = db.execute(
         select(Call.tronco, func.count(Call.id), func.sum(case((Call.categoria == "LIGACAO_MUDA", 1), else_=0)))
-        .where(done, Call.tronco.is_not(None), Call.data_ligacao >= ini, Call.data_ligacao <= t)
+        .where(avaliada, Call.tronco.is_not(None), Call.data_ligacao >= ini, Call.data_ligacao <= t)
         .group_by(Call.tronco)
     ).all()
     tot_n = sum(r[1] for r in rows)
@@ -102,7 +104,7 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
     # ---- pedidos de não ligar sem registro (LGPD)
     ini = t - timedelta(hours=24)
     n = db.scalar(select(func.count(Call.id)).where(
-        done, Call.pediu_nao_ligar.is_(True), Call.divergencia_tabulacao.is_(True),
+        avaliada, Call.pediu_nao_ligar.is_(True), Call.divergencia_tabulacao.is_(True),
         Call.divergencia_detalhe.like("%não ligar%"), Call.data_ligacao >= ini, Call.data_ligacao <= t)) or 0
     if n:
         out.append({

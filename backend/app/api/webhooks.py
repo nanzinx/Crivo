@@ -34,7 +34,7 @@ def upsert_from_argus(db: Session, p: dict, origem: str = "argus") -> Call | Non
     id_lig = int(id_lig)
     call = db.scalars(select(Call).where(Call.id_ligacao == id_lig)).first()
     if call is None:
-        call = Call(id_ligacao=id_lig, origem=origem, status="pending")
+        call = Call(id_ligacao=id_lig, origem=origem, status="pendente")
         db.add(call)
     call.id_campanha = g("idCampanha") or call.id_campanha
     call.nr_lead = g("nrLead") or call.nr_lead
@@ -71,6 +71,6 @@ async def argus_webhook(request: Request, db: Session = Depends(get_db),
     if call is None:
         return {"ok": True, "ignorado": "sem idLigacao (tabulação sem ligação)"}
     queued = False
-    if tipo == 2:  # tabulação = ligação encerrada, gravação disponível
+    if tipo == 2:  # tabulação = ligação encerrada, gravação disponível: baixa e vai para a monitora
         queued = worker.enqueue(call.id)
     return {"ok": True, "id": call.id, "enfileirado": queued}

@@ -62,9 +62,9 @@ def _serializar(row: Tabulacao, stats: dict | None = None) -> dict:
 
 
 def _stats(db: Session) -> dict[int, dict]:
-    done = Call.status == "done"
+    avaliada = Call.status == "avaliada"
     rows = db.execute(
-        select(Call.tabulacao_id, func.count(Call.id), func.sum(case((done, 1), else_=0)),
+        select(Call.tabulacao_id, func.count(Call.id), func.sum(case((avaliada, 1), else_=0)),
                func.sum(case((Call.divergencia_tabulacao.is_(True), 1), else_=0)),
                func.sum(case((Call.divergencia_gravidade == "alta", 1), else_=0)))
         .where(Call.tabulacao_id.is_not(None)).group_by(Call.tabulacao_id)

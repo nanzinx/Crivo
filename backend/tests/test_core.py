@@ -1,11 +1,11 @@
-# O banco temporário e a ausência de OPENAI_API_KEY são configurados em conftest.py
+# O banco temporário é configurado em conftest.py
 from datetime import datetime
 
 import pytest
 
 from app.database import SessionLocal, init_db
 from app.models import Call
-from app.services import ai_qualifier, local_ingestor, pipeline
+from app.services import local_ingestor, pipeline
 
 
 def test_parse_filename():
@@ -16,35 +16,17 @@ def test_parse_filename():
     assert local_ingestor.parse_filename("2026-11-05_123506_nr1_id2_9_.mp3")["nome_esperado"] is None
 
 
-@pytest.mark.parametrize("txt,sub", [
-    ("maria neuza esse número ela morreu", "TITULAR_FALECIDO"),
-    ("não conheço essa pessoa moço, desculpa", "ENGANO_DIRETO"),
-    ("não é ela, é do meu esposo, ele só chega de noite", "TERCEIRO_FAMILIA"),
-    ("não é ela, vocês ligam todo dia pra esse número", "RECLAMACAO_RECORRENTE"),
-])
-def test_heuristica_nao_e_cliente(txt, sub):
-    r = ai_qualifier.heuristica(txt + " " * 3, 20)
-    assert r.categoria == "NAO_E_O_CLIENTE" and r.subcategoria == sub
-
-
-def test_heuristica_outras():
-    assert ai_qualifier.heuristica("Deixe seu recado após o sinal", 10).categoria == "CAIXA_POSTAL"
-    assert ai_qualifier.heuristica("", 5).subcategoria == "MUDO_TOTAL"
-    r = ai_qualifier.heuristica("não aguento mais, pare de ligar, que saco", 12)
-    assert r.subcategoria == "CLIENTE_REVOLTADO"
-
-
 def test_identidade_historico():
     init_db()
     with SessionLocal() as db:
-        a = Call(id_ligacao=9001, telefone="11999990000", nome_esperado="ELDER VALLEJO", status="done",
-                 categoria="SEM_INTERESSE", subcategoria="CLIENTE_CALMO", confianca=0.9,
+        a = Call(id_ligacao=9001, telefone="11999990000", nome_esperado="ELDER VALLEJO", status="avaliada",
+                 categoria="SEM_INTERESSE", subcategoria="CLIENTE_CALMO",
                  data_ligacao=datetime(2026, 11, 4, 10))
         db.add(a)
         db.flush()
         pipeline.resolver_identidade(db, a)
-        b = Call(id_ligacao=9002, telefone="11999990000", nome_esperado="Elder Vallejo", status="done",
-                 categoria="NAO_E_O_CLIENTE", subcategoria="ENGANO_DIRETO", confianca=0.8,
+        b = Call(id_ligacao=9002, telefone="11999990000", nome_esperado="Elder Vallejo", status="avaliada",
+                 categoria="NAO_E_O_CLIENTE", subcategoria="ENGANO_DIRETO",
                  data_ligacao=datetime(2026, 11, 5, 10))
         db.add(b)
         db.flush()
@@ -67,9 +49,3 @@ def test_webhook_e_filtros_de_data(client):
     assert all(i["id_ligacao"] != 777 for i in j["items"])
     assert client.get("/api/v1/analytics/summary", params={"data_inicio": "2026-11-05"}).status_code == 200
     assert client.get("/api/v1/analytics/timeline").status_code == 200
-
-
-def test_qualificar_fallback():
-    r = ai_qualifier.qualificar(None, "João", "11999991111", 10.0, "Alô, não conheço nenhum João")
-    assert r.categoria == "NAO_E_O_CLIENTE"
-    assert r.motor in ("heuristica", "openai")

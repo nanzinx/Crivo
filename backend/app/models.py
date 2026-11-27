@@ -12,7 +12,7 @@ from .database import Base
 
 
 class Call(Base):
-    """Ligação gravada + metadados Argus + qualificação."""
+    """Ligação gravada + metadados Argus + resultado da avaliação da monitora."""
 
     __tablename__ = "calls"
 
@@ -37,17 +37,13 @@ class Call(Base):
     direcionado: Mapped[int | None] = mapped_column(Integer, default=0)
     pre_atendimento: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    # Ciclo de vida: pendente (aguardando o áudio) -> pendente_avaliacao -> em_avaliacao -> avaliada | nao_avaliavel;
+    # erro = falha no download da gravação. Ver services/avaliacoes.py.
+    status: Mapped[str] = mapped_column(String(20), default="pendente", index=True)
+    # Resultado da ligação: cópia do que a monitora registrou na avaliação finalizada (avaliacao_id)
     categoria: Mapped[str | None] = mapped_column(String(40), index=True)
     subcategoria: Mapped[str | None] = mapped_column(String(60), index=True)
-    confianca: Mapped[float | None] = mapped_column(Float)
-    motor: Mapped[str | None] = mapped_column(String(30))  # openai | heuristica | csv | html
-    resumo: Mapped[str | None] = mapped_column(Text)
-    evidencia: Mapped[str | None] = mapped_column(Text)
-    transcricao: Mapped[str | None] = mapped_column(Text)
-    transcricao_diarizada: Mapped[list | None] = mapped_column(JSON)
-    sentimento_cliente: Mapped[str | None] = mapped_column(String(20))
-    metricas_acusticas: Mapped[dict | None] = mapped_column(JSON)
+    avaliacao_id: Mapped[int | None] = mapped_column(Integer, index=True)  # avaliação vigente (tabela avaliacoes)
     divergencia_tabulacao: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     divergencia_detalhe: Mapped[str | None] = mapped_column(Text)
     divergencia_gravidade: Mapped[str | None] = mapped_column(String(10), index=True)  # alta | media | baixa
@@ -65,25 +61,10 @@ class Call(Base):
     ligacao_referencia_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"))
     erro: Mapped[str | None] = mapped_column(Text)
 
-    # Resposta original da IA (preservada mesmo depois de uma revisão humana mudar `categoria`)
-    categoria_ia: Mapped[str | None] = mapped_column(String(40), index=True)
-    subcategoria_ia: Mapped[str | None] = mapped_column(String(60))
-    # Revisão humana feita pela tela (ou escuta manual importada): é o gabarito para medir a IA
-    categoria_revisada: Mapped[str | None] = mapped_column(String(40))
-    subcategoria_revisada: Mapped[str | None] = mapped_column(String(60))
-    revisado_por: Mapped[str | None] = mapped_column(String(80))
-    revisado_em: Mapped[datetime | None] = mapped_column(DateTime, index=True)
-    revisao_observacao: Mapped[str | None] = mapped_column(Text)
-    na_amostra: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)  # sorteada p/ revisão
-
-    # Revisão humana: a IA não teve segurança, ou o áudio contradiz a tabulação
-    precisa_revisao: Mapped[bool | None] = mapped_column(Boolean, default=False, index=True)
-    revisao_motivo: Mapped[str | None] = mapped_column(String(255))
-    fala_segundos: Mapped[float | None] = mapped_column(Float)  # fala detectada localmente (VAD)
-    custo_usd: Mapped[float | None] = mapped_column(Float, default=0)  # gasto acumulado de IA nesta ligação
+    # Colunas da versão anterior, com IA (confiança, motor, resumo, transcrição, custo...), continuam
+    # no banco antigo, mas saíram do código: ver database.migrar_dados e scripts/limpar_dados_ia.py.
 
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
-    qualificado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (Index("ix_calls_data_cat", "data_ligacao", "categoria"),)
 
@@ -103,7 +84,7 @@ class ContactIdentity(Base):
 
 
 class SystemStatus(Base):
-    """Último resultado de cada integração (webhook, polling, IA, download) para o painel de saúde."""
+    """Último resultado de cada integração (webhook, polling, download) para o painel de saúde."""
 
     __tablename__ = "system_status"
 
@@ -115,21 +96,37 @@ class SystemStatus(Base):
     ultima_falha_em: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class IaUso(Base):
-    """Cada chamada paga de IA (transcrição ou classificação). Base do painel de custo."""
+class Avaliacao(Base):
+    """Avaliação de uma ligação pela monitora de qualidade. Dela vem o resultado da ligação.
 
-    __tablename__ = "ia_uso"
+    origem: tela (registrada no painel) | importada (escuta manual em CSV/HTML) | migrada (revisão humana
+    da versão anterior, com IA).
+    """
+
+    __tablename__ = "avaliacoes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    call_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"), index=True)
-    em: Mapped[datetime] = mapped_column(DateTime, default=agora, index=True)
-    tipo: Mapped[str] = mapped_column(String(20))  # transcricao | classificacao
-    modelo: Mapped[str] = mapped_column(String(64))
-    audio_segundos: Mapped[float] = mapped_column(Float, default=0)  # duração enviada (paga)
-    audio_segundos_original: Mapped[float | None] = mapped_column(Float)  # duração da gravação, antes do corte
-    tokens_entrada: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_saida: Mapped[int] = mapped_column(Integer, default=0)
-    custo_usd: Mapped[float] = mapped_column(Float, default=0)
+    call_id: Mapped[int] = mapped_column(ForeignKey("calls.id"), index=True)
+    monitora_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    monitora_nome: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), default="rascunho", index=True)  # rascunho | finalizada | nao_avaliavel
+    origem: Mapped[str] = mapped_column(String(20), default="tela")  # tela | importada | migrada
+    categoria: Mapped[str | None] = mapped_column(String(40))
+    subcategoria: Mapped[str | None] = mapped_column(String(60))
+    pediu_nao_ligar: Mapped[bool] = mapped_column(Boolean, default=False)
+    nao_avaliavel_motivo: Mapped[str | None] = mapped_column(Text)
+    iniciada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    finalizada_em: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class SchemaMigracao(Base):
+    """Migrações de dados já aplicadas (database.migrar_dados): cada uma roda uma única vez."""
+
+    __tablename__ = "schema_migracoes"
+
+    nome: Mapped[str] = mapped_column(String(80), primary_key=True)
+    aplicada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
 
 
 class Tabulacao(Base):
@@ -146,7 +143,7 @@ class Tabulacao(Base):
     nome: Mapped[str] = mapped_column(String(255))  # texto como aparece no Argus
     id_argus: Mapped[int | None] = mapped_column(Integer, index=True)
     tipo: Mapped[str] = mapped_column(String(20), default="resultado")  # resultado | nao_tabulado | ignorar
-    categorias: Mapped[list | None] = mapped_column(JSON)  # categorias da IA aceitas como coerentes
+    categorias: Mapped[list | None] = mapped_column(JSON)  # categorias do resultado aceitas como coerentes
     subcategoria: Mapped[str | None] = mapped_column(String(60))  # opcional: exige também a subcategoria
     nao_ligar: Mapped[bool] = mapped_column(Boolean, default=False)  # esta tabulação registra o pedido de não ligar
     confirmada: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
@@ -196,7 +193,7 @@ class Usuario(Base):
     email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     nome: Mapped[str] = mapped_column(String(80))
     senha_hash: Mapped[str] = mapped_column(String(255))
-    papel: Mapped[str] = mapped_column(String(20), default="supervisor")  # admin | supervisor | leitura
+    papel: Mapped[str] = mapped_column(String(20), default="supervisor")  # admin | supervisor | monitora | leitura
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     ultimo_login_em: Mapped[datetime | None] = mapped_column(DateTime)

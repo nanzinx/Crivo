@@ -105,7 +105,7 @@ function Ligacoes() {
                     <th className="w-[120px] py-3">Quando</th>
                     <th className="py-3">Cliente</th>
                     <th className="hidden w-[150px] py-3 lg:table-cell">Operador</th>
-                    <th className="py-3">Tabulação × IA</th>
+                    <th className="py-3">Tabulação × monitoria</th>
                     <th className="hidden w-[110px] py-3 xl:table-cell">Desligou</th>
                     <th className="w-[80px] py-3 pr-4 text-right">Duração</th>
                   </tr>
@@ -149,12 +149,7 @@ function Ligacoes() {
                           </Pill>
                         ))}
                       {c.pediu_nao_ligar && <NaoLigarPill />}
-                      {c.motivo_fila && (
-                        <Pill tone="warn">
-                          <Ear className="h-3 w-3" /> revisar
-                        </Pill>
-                      )}
-                      {c.status !== "done" && <Pill tone={c.status === "error" ? "critical" : "neutral"}>{STATUS_LABEL[c.status]}</Pill>}
+                      <StatusPill status={c.status} />
                     </div>
                   </div>
                 </motion.li>
@@ -221,14 +216,7 @@ function Row({ c, items, active, onOpen, index }: { c: Call; items: Call[]; acti
           {c.categoria && <CategoryBadge code={c.categoria} sub={c.subcategoria_label !== "-" ? c.subcategoria_label : null} />}
           {c.divergencia_tabulacao && <GravidadePill g={c.divergencia_gravidade} />}
           {c.pediu_nao_ligar && <NaoLigarPill />}
-          {c.motivo_fila && (
-            <span title={c.motivo_fila ?? "Precisa de revisão humana"}>
-              <Pill tone="warn">
-                <Ear className="h-3 w-3" /> revisar
-              </Pill>
-            </span>
-          )}
-          {c.status !== "done" && <Pill tone={c.status === "error" ? "critical" : "neutral"}>{STATUS_LABEL[c.status]}</Pill>}
+          <StatusPill status={c.status} />
         </div>
         <div className={cn("mt-0.5 flex items-center gap-1 truncate text-xs", c.divergencia_tabulacao ? "text-critical" : "text-ink-muted")}>
           {c.divergencia_tabulacao && <AlertTriangle className="h-3 w-3 shrink-0" />}
@@ -239,4 +227,15 @@ function Row({ c, items, active, onOpen, index }: { c: Call; items: Call[]; acti
       <td className="num py-2.5 pr-4 text-right text-xs text-ink-2">{fmtDur(c.duracao_segundos)}</td>
     </motion.tr>
   );
+}
+
+function StatusPill({ status }: { status: string }) {
+  if (status === "avaliada") return null;
+  if (status === "pendente_avaliacao")
+    return (
+      <Pill tone="warn">
+        <Ear className="h-3 w-3" /> avaliar
+      </Pill>
+    );
+  return <Pill tone={status === "erro" ? "critical" : "neutral"}>{STATUS_LABEL[status] ?? status}</Pill>;
 }

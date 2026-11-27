@@ -10,7 +10,7 @@ Fluxo:
 Uma regra diz:
 - `tipo`: "resultado" (afirma um resultado), "nao_tabulado" (operador não registrou resultado,
   ex.: tempo pós-atendimento) ou "ignorar" (não comparável: tabulações de sistema, pausas...).
-- `categorias`: as categorias da IA aceitas como coerentes. Mais de uma quando o Argus é mais
+- `categorias`: os resultados da monitoria (categorias) aceitos como coerentes. Mais de uma quando o Argus é mais
   genérico que a taxonomia (ex.: "Muda / Caixa postal").
 - `subcategoria`: opcional; quando definida, a subcategoria também precisa bater.
 - `nao_ligar`: esta tabulação registra o pedido do cliente de não receber mais ligações.

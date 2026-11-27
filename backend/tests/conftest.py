@@ -5,7 +5,6 @@ temp_dir = tempfile.mkdtemp()
 db_path = os.path.join(temp_dir, "test.db").replace("\\", "/")
 # TEST_DATABASE_URL permite rodar a mesma suíte contra PostgreSQL (o banco é zerado no início)
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{db_path}"
-os.environ["OPENAI_API_KEY"] = ""
 os.environ["ARGUS_TOKEN"] = ""
 os.environ["AUTH_ATIVO"] = "false"  # os testes de login (test_auth.py) ligam por conta própria
 os.environ["RECORDINGS_DIR"] = os.path.join(temp_dir, "gravacoes")
@@ -20,9 +19,13 @@ from app.main import app
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     if os.environ.get("TEST_DATABASE_URL"):
-        from app.database import Base, engine
+        from sqlalchemy import text
 
-        Base.metadata.drop_all(engine)
+        from app.database import engine
+
+        with engine.begin() as conn:  # zera tudo, inclusive tabelas que saíram do código (ex.: da versão com IA)
+            conn.execute(text("DROP SCHEMA public CASCADE"))
+            conn.execute(text("CREATE SCHEMA public"))
     init_db()
 
 

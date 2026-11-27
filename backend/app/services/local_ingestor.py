@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Call, agora
-from . import pipeline, tabulacoes
+from ..models import Call
+from . import avaliacoes, pipeline, tabulacoes
 
 FILE_RE = re.compile(
     r"^(?P<data>\d{4}-\d{2}-\d{2})_(?P<hora>\d{6})_nr(?P<nr>\d+)_id(?P<id>\d+)_(?P<tel>\d+)_(?P<nome>.*)\.(?:mp3|wav)$",
@@ -65,7 +65,7 @@ def vincular_ou_criar(db: Session, nome_arq: str, meta: dict, origem: str,
             acao = "vinculada"
             call.nome_arquivo = call.nome_arquivo or nome_arq
     if call is None:
-        call = Call(nome_arquivo=nome_arq, origem=origem, status="pending", **meta)
+        call = Call(nome_arquivo=nome_arq, origem=origem, status=avaliacoes.PENDENTE, **meta)
         db.add(call)
         acao = "nova"
     else:
@@ -74,6 +74,8 @@ def vincular_ou_criar(db: Session, nome_arq: str, meta: dict, origem: str,
                 setattr(call, k, v)
     if caminho and not call.caminho_audio:
         call.caminho_audio = caminho
+    if call.caminho_audio and call.status in (avaliacoes.PENDENTE, avaliacoes.ERRO):
+        call.status, call.erro = avaliacoes.PENDENTE_AVALIACAO, None  # gravação no disco: vai para a monitora
     db.flush()
     return call, acao
 
@@ -134,6 +136,14 @@ def _caminho_local(nome_arq: str) -> str | None:
     return str(f) if f.exists() else None
 
 
+def _importar_escuta(db: Session, call: Call, categoria: str, subcategoria: str | None, fonte: str) -> None:
+    """Resultado da escuta manual anterior vira uma avaliação finalizada de origem "importada" (sem checklist)."""
+    avaliacoes.registrar_resultado(db, call, categoria, subcategoria, monitora_nome=f"Escuta manual ({fonte})",
+                                   origem="importada")
+    if subcategoria == "E_O_CLIENTE_HISTORICO":  # a própria escuta já apontou o conflito de identidade
+        call.conflito_identidade = True
+
+
 def import_legacy_csv(db: Session, path: str | None = None) -> dict:
     """Importa o relatório da escuta manual/anterior. Aceita ';' ou ',' e cabeçalhos com/sem acento."""
     p = Path(path or settings.legacy_csv)
@@ -151,24 +161,15 @@ def import_legacy_csv(db: Session, path: str | None = None) -> dict:
             continue
         call, acao = vincular_ou_criar(db, nome_arq, meta, "csv", _caminho_local(nome_arq))
         created += acao == "nova"
-        call.transcricao = call.transcricao or (row.get("transcricao completa") or row.get("transcricao") or None)
         dur = row.get("duracao (segundos)") or row.get("duracao_segundos")
         try:
             call.duracao_segundos = float(str(dur).replace(",", "."))
         except (TypeError, ValueError):
             pass
         cat = cats.get(_nk(row.get("categoria", "")))
-        if cat and call.status != "done":
+        if cat and call.status not in avaliacoes.FINALIZADAS:
             sub_label = _nk(row.get("subcategoria", ""))
-            sub = _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label)))
-            call.categoria, call.subcategoria = cat, sub
-            call.status, call.motor, call.confianca = "done", "csv", 0.8
-            call.categoria_revisada, call.subcategoria_revisada = cat, sub
-            call.revisado_por, call.revisado_em = "Escuta manual (CSV)", agora()
-            call.resumo = "Importado do relatório de escuta anterior."
-            call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
-            call.qualificado_em = agora()
-            pipeline.atualizar_divergencia(db, call)
+            _importar_escuta(db, call, cat, _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label))), "CSV")
             mapped += 1
         enriched += 1
     db.commit()
@@ -310,7 +311,7 @@ def import_cruzar_dados(db: Session, path: str | None = None, conteudo: bytes | 
         cod_tab = get(row, "cod_tabulacao")
         if cod_tab.isdigit():
             call.id_tabulacao_argus = int(cod_tab)
-        pipeline.atualizar_divergencia(db, call, nao_ligar)  # mesma regra usada após a qualificação da IA
+        pipeline.atualizar_divergencia(db, call, nao_ligar)  # mesma regra usada após a avaliação da monitora
         divergent += bool(call.divergencia_tabulacao)
         enriched += 1
 
@@ -323,7 +324,7 @@ def import_cruzar_dados(db: Session, path: str | None = None, conteudo: bytes | 
 
 
 def import_legacy_html(db: Session, path: str | None = None) -> dict:
-    """Importa metadados enriquecidos (troncos, durações e transcrições) do dashboard_gravacoes.html."""
+    """Importa metadados (troncos, durações) e o resultado da escuta manual do dashboard_gravacoes.html."""
     p = Path(path or settings.legacy_html)
     if not p.exists():
         return {"linhas_processadas": 0, "criadas": 0}
@@ -354,21 +355,11 @@ def import_legacy_html(db: Session, path: str | None = None) -> dict:
             call.telefone = item.get("p")
         if item.get("d") is not None:
             call.duracao_segundos = float(item["d"])
-        if item.get("t"):
-            call.transcricao = item.get("t")
 
         cat = cats.get(_nk(item.get("c", "")))
-        if cat and call.status != "done":
+        if cat and call.status not in avaliacoes.FINALIZADAS:
             sub_label = _nk(item.get("s", ""))
-            sub = _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label)))
-            call.categoria, call.subcategoria = cat, sub
-            call.status, call.motor, call.confianca = "done", "html", 0.85
-            call.categoria_revisada, call.subcategoria_revisada = cat, sub
-            call.revisado_por, call.revisado_em = "Escuta manual (HTML)", agora()
-            call.resumo = "Auditado da base de gravações."
-            call.conflito_identidade = sub == "E_O_CLIENTE_HISTORICO"
-            call.qualificado_em = agora()
-            pipeline.atualizar_divergencia(db, call)
+            _importar_escuta(db, call, cat, _SUB_ALIAS.get(sub_label, subs.get((cat, sub_label))), "HTML")
         enriched += 1
 
     db.commit()

@@ -1,8 +1,9 @@
 """Login: senhas com scrypt (biblioteca padrão), sessões opacas revogáveis e perfis de acesso.
 
 Perfis:
-- admin: tudo, inclusive gerenciar usuários;
-- supervisor: consulta e ações (revisar, confirmar tabulações, importar, sincronizar);
+- admin: tudo, inclusive gerenciar usuários e registrar o resultado das ligações;
+- supervisor: consulta e ações (confirmar tabulações, importar, sincronizar, alertas);
+- monitora: monitoria de qualidade: ouve as ligações e registra o resultado (além do que o supervisor faz);
 - leitura: só consulta.
 """
 import base64
@@ -17,7 +18,8 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import Sessao, Usuario, agora
 
-PAPEIS = {"admin": "Administrador", "supervisor": "Supervisor", "leitura": "Só leitura"}
+PAPEIS = {"admin": "Administrador", "supervisor": "Supervisor", "monitora": "Monitora de qualidade",
+          "leitura": "Só leitura"}
 SENHA_MINIMA = 8
 MAX_FALHAS = 5
 BLOQUEIO_MINUTOS = 5

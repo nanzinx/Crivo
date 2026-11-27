@@ -22,7 +22,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/components/auth-context";
 import { Button, Card, Empty, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, relatorioHtmlUrl, type Alerta, type Relatorio } from "@/lib/api";
-import { cn, fmtAgo, fmtDateTime, fmtDay, fmtInt, fmtPct, fmtUsd } from "@/lib/utils";
+import { cn, fmtAgo, fmtDateTime, fmtDay, fmtInt, fmtPct } from "@/lib/utils";
 
 const DIAS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"];
 const descreverDias = (s: string) => {
@@ -276,7 +276,7 @@ function RelatorioLinha({ r }: { r: Relatorio }) {
           {fmtDay(r.data)}
         </button>
         <span className="num text-xs text-ink-2">
-          {fmtInt(d.total)} ligações · {fmtPct(d.divergencias.taxa)} divergência ({fmtInt(d.divergencias.por_gravidade.alta ?? 0)} alta) · {fmtUsd(d.custo_usd)}
+          {fmtInt(d.total)} ligações · {fmtPct(d.divergencias.taxa)} divergência ({fmtInt(d.divergencias.por_gravidade.alta ?? 0)} alta){d.aguardando_avaliacao ? ` · ${fmtInt(d.aguardando_avaliacao)} aguardando avaliação` : ""}
         </span>
         <span className="ml-auto flex items-center gap-2">
           {r.enviado_em ? (

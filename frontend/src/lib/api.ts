@@ -11,15 +11,29 @@ export type Filters = {
   tipo_discagem?: string;
   desligado_por?: string;
   divergencia?: string; // "true" | "false"
-  revisao?: string; // "true" | "false"
-  revisado?: string; // "true" | "false"
+  revisao?: string; // "true" = fila de avaliação (status pendente_avaliacao)
+  revisado?: string; // "true" = a monitora já deu o veredito (avaliada ou não avaliável)
   gravidade?: string; // alta | media | baixa
   nao_ligar?: string; // "true" | "false"
   status?: string;
   q?: string;
 };
 
-export type Turno = { speaker: string; text: string; sentiment?: string | null };
+export type StatusLigacao = "pendente" | "pendente_avaliacao" | "em_avaliacao" | "avaliada" | "nao_avaliavel" | "erro";
+
+export type Avaliacao = {
+  id: number;
+  status: "rascunho" | "finalizada" | "nao_avaliavel";
+  origem: "tela" | "importada" | "migrada";
+  monitora_id: number | null;
+  monitora_nome: string | null;
+  categoria: string | null;
+  subcategoria: string | null;
+  pediu_nao_ligar: boolean;
+  nao_avaliavel_motivo: string | null;
+  iniciada_em: string | null;
+  finalizada_em: string | null;
+};
 
 export type Call = {
   id: number;
@@ -43,16 +57,12 @@ export type Call = {
   data_ligacao?: string | null;
   duracao_segundos?: number | null;
   origem: string;
-  status: string;
+  status: StatusLigacao | string;
+  avaliada?: boolean;
   categoria?: string | null;
   categoria_label?: string | null;
   subcategoria?: string | null;
   subcategoria_label?: string | null;
-  confianca?: number | null;
-  motor?: string | null;
-  resumo?: string | null;
-  evidencia?: string | null;
-  sentimento_cliente?: string | null;
   conflito_identidade?: boolean;
   divergencia_tabulacao?: boolean;
   divergencia_detalhe?: string | null;
@@ -60,28 +70,13 @@ export type Call = {
   pediu_nao_ligar?: boolean;
   tabulacao_id?: number | null;
   tabulacao_confirmada?: boolean | null;
-  precisa_revisao?: boolean;
-  motivo_fila?: string | null;
-  na_amostra?: boolean;
-  categoria_ia?: string | null;
-  subcategoria_ia?: string | null;
-  categoria_ia_label?: string | null;
-  subcategoria_ia_label?: string | null;
-  revisado?: boolean;
-  revisado_por?: string | null;
-  revisado_em?: string | null;
-  revisao_observacao?: string | null;
-  ia_acertou?: boolean | null;
-  revisao_motivo?: string | null;
-  fala_segundos?: number | null;
-  custo_usd?: number;
+  avaliado_por?: string | null;
+  avaliado_em?: string | null;
   ligacao_referencia_id?: number | null;
   tem_audio?: boolean;
   erro?: string | null;
   // só no detalhe
-  transcricao?: string | null;
-  transcricao_diarizada?: Turno[] | null;
-  metricas_acusticas?: Record<string, unknown> | null;
+  avaliacao?: Avaliacao | null;
   nome_arquivo?: string | null;
   ligacao_referencia?: Call;
 };
@@ -93,10 +88,13 @@ export type Dist = { tipo: string; total: number; pct: number };
 export type Summary = {
   total: number;
   qualificadas: number;
+  avaliadas: number;
+  nao_avaliadas: number;
+  nao_avaliaveis: number;
+  aguardando_avaliacao: number;
   status: Record<string, number>;
   duracao_media: number;
   duracao_total_horas: number;
-  confianca_media: number | null;
   conflitos_identidade: number;
   desligamentos: Dist[];
   agentes: Dist[];
@@ -104,9 +102,6 @@ export type Summary = {
   troncos: (Dist & { tronco: string })[];
   divergencias: { total: number; comparaveis: number; taxa: number; por_gravidade: Record<"alta" | "media" | "baixa", number> };
   nao_ligar: number;
-  revisao: number;
-  sem_ia: number;
-  custo_usd: number;
   matriz_contraste: {
     tabulacao_operador: string;
     esperada: string;
@@ -116,7 +111,7 @@ export type Summary = {
     total: number;
     categorias: Record<string, number>;
   }[];
-  ranking_operadores: { operador: string; total: number; qualificadas: number; divergencias: number; taxa_divergencia: number }[];
+  ranking_operadores: { operador: string; total: number; qualificadas: number; avaliadas: number; divergencias: number; taxa_divergencia: number }[];
   categorias: {
     codigo: string;
     label: string;
@@ -150,72 +145,20 @@ export type Evento = {
   ultima_falha_em: string | null;
 };
 
-export type Custos = {
-  hoje_usd: number;
-  mes_usd: number;
-  ligacoes_com_ia_mes: number;
-  custo_medio_usd: number;
-  minutos_transcritos_mes: number;
-  minutos_economizados_mes: number;
-  economia_corte_pct: number;
-  corte_silencio: boolean;
-  por_canal: boolean;
-  resolvidas_sem_ia_mes: number;
-  teto_diario_usd: number;
-  teto_pct: number | null;
-  modelo_transcricao: string;
-  modelo_classificacao: string;
-  diarizacao: boolean;
-  modelos_sem_preco: string[];
-  serie: { data: string; usd: number }[];
-};
-
 export type Saude = {
   gerado_em: string;
   integracoes: {
-    ia: { configurada: boolean; modelo: string; transcricao: string };
     argus: { configurado: boolean; campanhas: number[]; polling_minutos: number };
   };
   fila: { tamanho: number };
-  status_ligacoes: { pending: number; awaiting_ai: number; done: number; error: number };
+  status_ligacoes: Record<StatusLigacao, number>;
   recebidas_24h: number;
   ultima_ligacao_em: string | null;
   eventos: Record<string, Evento>;
   erros_recentes: { id: number; id_ligacao: number | null; data_ligacao: string | null; erro: string | null; operador_nome: string | null }[];
-  custos: Custos;
-  revisao_pendente: number;
+  aguardando_avaliacao: number;
   tabulacoes_pendentes: number;
   alertas: { nivel: "critico" | "atencao"; titulo: string; mensagem: string }[];
-};
-
-export type Qualidade = {
-  avaliadas: number;
-  acertos: number;
-  acuracia: number;
-  acuracia_subcategoria: number;
-  amostra_pequena: boolean;
-  por_categoria: { codigo: string; label: string; humano: number; ia: number; acertos: number; precisao: number; recall: number }[];
-  confusao: { categorias: string[]; linhas: { humano: string; total: number; ia: Record<string, number> }[] };
-  por_confianca: { faixa: string; n: number; acertos: number; acuracia: number }[];
-  por_motor: { motor: string; n: number; acuracia: number }[];
-  divergencias: { apontadas: number; confirmadas: number; precisao: number; perdidas: number };
-  fila: { pendentes: number; revisadas_7d: number; amostra_pct: number; confianca_minima: number };
-  gabarito: { revisadas_sem_resposta_ia: number };
-  discordancias: {
-    id: number;
-    id_ligacao: number | null;
-    data_ligacao: string | null;
-    operador_nome: string | null;
-    humano: string;
-    humano_label: string;
-    humano_sub_label: string | null;
-    ia: string;
-    ia_label: string;
-    ia_sub_label: string | null;
-    confianca: number | null;
-    revisado_por: string | null;
-    observacao: string | null;
-  }[];
 };
 
 export type Alerta = {
@@ -254,20 +197,25 @@ export type Relatorio = {
   dados: {
     total: number;
     qualificadas: number;
+    nao_avaliadas?: number;
     divergencias: { total: number; taxa: number; por_gravidade: Record<string, number> };
     mudas_pct: number;
     nao_ligar: number;
-    fila_revisao: number;
-    revisadas_no_dia: number;
-    custo_usd: number;
-    acuracia_7d: { acuracia: number; avaliadas: number };
+    aguardando_avaliacao?: number;
+    avaliadas_no_dia?: number;
     operadores: { operador: string; qualificadas: number; divergencias: number; taxa_divergencia: number; altas: number }[];
     alertas_abertos: { nivel: string; titulo: string; mensagem: string }[];
   };
   envio?: { enviado: boolean; canais?: string[]; erros?: Record<string, string>; motivo?: string };
 };
 
-export type RevisaoIn = { categoria: string; subcategoria: string | null; revisor: string; observacao: string | null };
+export type ResultadoIn = {
+  categoria?: string | null;
+  subcategoria?: string | null;
+  pediu_nao_ligar?: boolean;
+  nao_avaliavel?: boolean;
+  motivo?: string | null;
+};
 
 export type TipoTabulacao = "resultado" | "nao_tabulado" | "ignorar";
 
@@ -320,12 +268,17 @@ export type Usuario = {
   id: number;
   email: string;
   nome: string;
-  papel: "admin" | "supervisor" | "leitura";
+  papel: Papel;
   papel_label: string;
   ativo: boolean;
   criado_em?: string | null;
   ultimo_login_em?: string | null;
 };
+
+export type Papel = "admin" | "supervisor" | "monitora" | "leitura";
+
+/** Quem registra o resultado das ligações (o backend confere de novo). */
+export const podeAvaliar = (u?: Pick<Usuario, "papel"> | null) => !!u && (u.papel === "monitora" || u.papel === "admin");
 
 export type EstadoAuth = { auth_ativo: boolean; precisa_configurar: boolean; usuario: Usuario | null };
 
@@ -390,10 +343,7 @@ export const api = {
   gerarRelatorio: (enviar: boolean, data?: string) => post<Relatorio>("/api/v1/relatorios/gerar", { enviar, data }),
   enviarRelatorio: (id: number) => post<Relatorio>(`/api/v1/relatorios/${id}/enviar`),
   testarNotificacao: () => post<{ enviado: boolean; canais?: string[]; erros?: Record<string, string>; motivo?: string }>("/api/v1/notificacoes/teste"),
-  qualidade: () => get<Qualidade>("/api/v1/qualidade"),
-  medirQualidade: (n: number) => post<{ enfileiradas: number; custo_estimado_usd: number }>("/api/v1/qualidade/medir", { n }),
-  revisar: (id: number, r: RevisaoIn) => enviarJson<Call>(`/api/v1/calls/${id}/revisao`, "POST", r),
-  desfazerRevisao: (id: number) => enviarJson<Call>(`/api/v1/calls/${id}/revisao`, "DELETE", undefined),
+  registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
     enviarJson<{ tabulacao: Tabulacao; recalculadas: number; mudaram: number }>(`/api/v1/tabulacoes/${id}`, "PUT", regra),
@@ -411,8 +361,8 @@ export const api = {
   taxonomy: () => get<Taxonomy>("/api/v1/taxonomy"),
   options: () => get<FilterOptions>("/api/v1/analyst/filters-options"),
   saude: () => get<Saude>("/api/v1/saude"),
-  reprocessar: (id: number) => post<{ enfileirada: boolean }>(`/api/v1/sync/reprocess/${id}`),
   processarPendentes: () => post<{ enfileiradas: number }>("/api/v1/sync/process"),
+  baixarAudioDeNovo: (id: number) => post<{ enfileirada: boolean }>(`/api/v1/sync/reprocess/${id}`),
   importarLocal: () => post<Record<string, unknown>>("/api/v1/sync/local"),
   sincronizarArgus: (p: { ultimos_minutos?: number; data_inicio?: string; data_fim?: string }) =>
     post<{ ok: boolean; ligacoes: number; enfileiradas: number }>("/api/v1/sync/argus", p),

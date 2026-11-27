@@ -2,13 +2,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from fastapi import Depends
-
-from .api import auth, calls, monitoramento, qualidade, saude, sync, tabulacoes, webhooks
+from .api import auth, calls, monitoramento, saude, sync, tabulacoes, webhooks
 from .config import settings
 from .database import init_db
 from .services import argus_client, sincronizador
@@ -29,24 +27,6 @@ async def _poll_argus():
             await asyncio.to_thread(sincronizador.sincronizar_recentes, settings.argus_poll_minutos * 3)
         except Exception:  # pragma: no cover - sincronizar já registra a falha
             log.exception("polling Argus")
-
-
-async def _retomar_aguardando():
-    """A cada 10 min, retoma as ligações "aguardando IA" quando há chave e o teto diário permite."""
-    from .database import SessionLocal
-    from .services import custos
-
-    while True:
-        await asyncio.sleep(600)
-        try:
-            if not settings.openai_api_key:
-                continue
-            with SessionLocal() as db:
-                bloqueado = custos.teto_atingido(db)
-            if not bloqueado:
-                await asyncio.to_thread(worker.enqueue_aguardando)
-        except Exception:  # pragma: no cover
-            log.exception("retomada de ligações aguardando IA")
 
 
 def _ciclo_monitoramento() -> None:
@@ -76,16 +56,15 @@ async def lifespan(app: FastAPI):
     init_db()
     worker.start()
     task = asyncio.create_task(_poll_argus()) if settings.argus_token and argus_client.campaign_ids() else None
-    retomada = asyncio.create_task(_retomar_aguardando())
     monitor = asyncio.create_task(_monitorar())
     yield
-    retomada.cancel()
     monitor.cancel()
     if task:
         task.cancel()
 
 
-app = FastAPI(title="Crivo", description="Auditoria de ligações: Argus × IA", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Crivo", description="Auditoria de ligações: tabulação do Argus × monitoria humana",
+              version="0.4.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_list, allow_methods=["*"], allow_headers=["*"])
 protegido = [Depends(auth.exigir_login)]  # o webhook do Argus usa segredo próprio; /health fica aberto
 app.include_router(auth.router)
@@ -94,11 +73,9 @@ app.include_router(webhooks.router)
 app.include_router(sync.router, dependencies=protegido)
 app.include_router(saude.router, dependencies=protegido)
 app.include_router(tabulacoes.router, dependencies=protegido)
-app.include_router(qualidade.router, dependencies=protegido)
 app.include_router(monitoramento.router, dependencies=protegido)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "ia": "openai" if settings.openai_api_key else "sem-chave",
-            "argus": bool(settings.argus_token)}
+    return {"ok": True, "argus": bool(settings.argus_token)}

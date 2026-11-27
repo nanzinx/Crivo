@@ -11,6 +11,7 @@ def test_divergencia_logic():
     call = Call(
         tabulacao_operador="CLIENTE NÃO TEM INTERESSE",
         categoria="EM_NEGOCIACAO",
+        status="avaliada",
     )
     pipeline.calcular_divergencia(call)
     assert call.divergencia_tabulacao is True
@@ -19,6 +20,7 @@ def test_divergencia_logic():
     call_ok = Call(
         tabulacao_operador="EM NEGOCIAÇÃO",
         categoria="EM_NEGOCIACAO",
+        status="avaliada",
     )
     pipeline.calcular_divergencia(call_ok)
     assert call_ok.divergencia_tabulacao is False
@@ -38,7 +40,7 @@ def test_analyst_endpoints_and_filters(client):
         desligamento_detalhe="Atendimento: BYE recebido.",
         tabulacao_operador="CLIENTE NÃO TEM INTERESSE",
         categoria="EM_NEGOCIACAO",
-        status="done",
+        status="avaliada",
         divergencia_tabulacao=True,
         data_ligacao=datetime(2026, 11, 6, 10, 0, 0),
     )
@@ -54,7 +56,7 @@ def test_analyst_endpoints_and_filters(client):
         desligamento_detalhe="Atendimento: BYE enviado.",
         tabulacao_operador="LIGAÇÃO MUDA / CAIXA POSTAL",
         categoria="LIGACAO_MUDA",
-        status="done",
+        status="avaliada",
         divergencia_tabulacao=False,
         data_ligacao=datetime(2026, 11, 6, 11, 0, 0),
     )

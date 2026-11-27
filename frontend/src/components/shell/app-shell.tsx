@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, LogOut, Users } from "lucide-react";
 import { useAuth } from "@/components/auth-context";
-import { Activity, BellRing, Gauge, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
+import { Activity, BellRing, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -18,7 +18,6 @@ const NAV = [
   { href: "/", label: "Visão geral", short: "Visão", icon: LayoutDashboard },
   { href: "/ligacoes", label: "Ligações", short: "Ligações", icon: ListMusic },
   { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks },
-  { href: "/qualidade", label: "Qualidade da IA", short: "Qualidade", icon: Gauge },
   { href: "/alertas", label: "Alertas e relatórios", short: "Alertas", icon: BellRing },
   { href: "/saude", label: "Saúde do sistema", short: "Saúde", icon: Activity },
 ];

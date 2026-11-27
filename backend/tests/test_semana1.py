@@ -7,50 +7,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Call
-from app.services import ai_qualifier, argus_client, local_ingestor, pipeline, sincronizador
-
-
-# --------------------------------------------------------------------------- 1. falha da IA
-def test_falha_da_ia_marca_erro_e_preserva_transcricao(monkeypatch, tmp_path):
-    audio = tmp_path / "a.mp3"
-    audio.write_bytes(b"\x00" * 64)
-    monkeypatch.setattr(settings, "openai_api_key", "sk-teste")
-    monkeypatch.setattr(ai_qualifier, "_cliente_openai", lambda: object())
-    monkeypatch.setattr(ai_qualifier, "transcrever_audio", lambda client, path: "alô, quem fala? não conheço")
-
-    def _explode(*a, **k):
-        raise RuntimeError("429 rate limit")
-
-    monkeypatch.setattr(ai_qualifier, "_classificar_texto", _explode)
-
-    with SessionLocal() as db:
-        call = Call(id_ligacao=310001, caminho_audio=str(audio), status="pending")
-        db.add(call)
-        db.commit()
-        pipeline.qualificar_call(db, call)
-        db.refresh(call)
-        assert call.status == "error"
-        assert call.categoria is None, "não pode inventar 'Ligação Muda' quando a IA falha"
-        assert call.transcricao == "alô, quem fala? não conheço"
-        assert "429" in (call.erro or "")
-
-
-def test_falha_na_transcricao_tambem_vira_erro(monkeypatch, tmp_path):
-    audio = tmp_path / "b.mp3"
-    audio.write_bytes(b"\x00" * 64)
-    monkeypatch.setattr(settings, "openai_api_key", "sk-teste")
-    monkeypatch.setattr(ai_qualifier, "_cliente_openai", lambda: object())
-
-    def _explode(*a, **k):
-        raise TimeoutError("timeout whisper")
-
-    monkeypatch.setattr(ai_qualifier, "transcrever_audio", _explode)
-    with SessionLocal() as db:
-        call = Call(id_ligacao=310002, caminho_audio=str(audio), status="pending")
-        db.add(call)
-        db.commit()
-        pipeline.qualificar_call(db, call)
-        assert call.status == "error" and call.categoria is None
+from app.services import argus_client, local_ingestor, sincronizador
 
 
 # --------------------------------------------------------------------------- 2/3/4. cruzamento
@@ -106,7 +63,7 @@ def test_sync_local_executa_o_cruzamento_lendo_por_cabecalho(client, pastas):
 def test_cruzamento_le_csv_utf8_sem_corromper_acentos(pastas):
     tmp, _ = pastas
     with SessionLocal() as db:
-        db.add(Call(id_ligacao=320101, nome_arquivo="x320101.mp3", status="pending"))
+        db.add(Call(id_ligacao=320101, nome_arquivo="x320101.mp3", status="pendente"))
         db.commit()
         _escreve_csv(tmp / "cruzar_dados.csv", [_linha("x320101.mp3", 320101, usuario="João Ávila")])
         local_ingestor.import_cruzar_dados(db)
@@ -116,7 +73,7 @@ def test_cruzamento_le_csv_utf8_sem_corromper_acentos(pastas):
 
 def test_cruzamento_aceita_upload_em_cp1252(client):
     with SessionLocal() as db:
-        db.add(Call(id_ligacao=320201, nome_arquivo="x320201.mp3", status="pending"))
+        db.add(Call(id_ligacao=320201, nome_arquivo="x320201.mp3", status="pendente"))
         db.commit()
     txt = "\n".join(";".join(l) for l in [CRUZAR_HEADER, _linha("x320201.mp3", 320201, usuario="Conceição")])
     r = client.post("/api/v1/sync/cruzar", files={"arquivo": ("cruzar.csv", txt.encode("cp1252"), "text/csv")})
@@ -129,8 +86,8 @@ def test_cruzamento_aceita_upload_em_cp1252(client):
 def test_grupo_vazio_nao_vira_comercial(pastas):
     tmp, _ = pastas
     with SessionLocal() as db:
-        db.add(Call(id_ligacao=320301, nome_arquivo="x320301.mp3", status="pending"))
-        db.add(Call(id_ligacao=320302, nome_arquivo="x320302.mp3", status="pending"))
+        db.add(Call(id_ligacao=320301, nome_arquivo="x320301.mp3", status="pendente"))
+        db.add(Call(id_ligacao=320302, nome_arquivo="x320302.mp3", status="pendente"))
         db.commit()
         _escreve_csv(tmp / "cruzar_dados.csv", [
             _linha("x320301.mp3", 320301, grupo=""),
@@ -146,7 +103,7 @@ def test_grupo_vazio_nao_vira_comercial(pastas):
 def test_divergencia_do_cruzamento_usa_a_mesma_regra_do_pipeline(pastas):
     tmp, _ = pastas
     with SessionLocal() as db:
-        db.add(Call(id_ligacao=320401, nome_arquivo="x320401.mp3", status="done", categoria="SEM_INTERESSE",
+        db.add(Call(id_ligacao=320401, nome_arquivo="x320401.mp3", status="avaliada", categoria="SEM_INTERESSE",
                     divergencia_tabulacao=True, divergencia_detalhe="antigo"))
         db.commit()
         _escreve_csv(tmp / "cruzar_dados.csv", [_linha("x320401.mp3", 320401, tab="SEM INTERESSE")])
@@ -159,7 +116,7 @@ def test_divergencia_do_cruzamento_usa_a_mesma_regra_do_pipeline(pastas):
 def test_importar_pasta_vincula_ligacao_que_ja_veio_do_argus(pastas):
     _, rec = pastas
     with SessionLocal() as db:
-        db.add(Call(id_ligacao=330001, origem="argus", status="error", erro="download: falhou"))
+        db.add(Call(id_ligacao=330001, origem="argus", status="erro", erro="download: falhou"))
         db.commit()
         nome = "2026-11-05_090000_nr9_id330001_11977776666_JOSE.mp3"
         (rec / nome).write_bytes(b"\x00" * 32)
@@ -211,8 +168,8 @@ def test_webhook_registra_ultimo_recebimento(client):
 def test_timeline_respeita_filtro_de_categoria(client):
     with SessionLocal() as db:
         db.add_all([
-            Call(id_ligacao=360001, status="done", categoria="CAIXA_POSTAL", data_ligacao=datetime(2025, 1, 2, 9)),
-            Call(id_ligacao=360002, status="done", categoria="SEM_INTERESSE", data_ligacao=datetime(2025, 1, 2, 9)),
+            Call(id_ligacao=360001, status="avaliada", categoria="CAIXA_POSTAL", data_ligacao=datetime(2025, 1, 2, 9)),
+            Call(id_ligacao=360002, status="avaliada", categoria="SEM_INTERESSE", data_ligacao=datetime(2025, 1, 2, 9)),
         ])
         db.commit()
     tl = client.get("/api/v1/analytics/timeline",
@@ -220,12 +177,12 @@ def test_timeline_respeita_filtro_de_categoria(client):
     assert tl == [{"data": "2025-01-02", "CAIXA_POSTAL": 1}]
 
 
-def test_taxa_de_divergencia_do_operador_usa_so_ligacoes_qualificadas(client):
+def test_taxa_de_divergencia_do_operador_usa_so_ligacoes_avaliadas(client):
     with SessionLocal() as db:
         db.add_all([
-            Call(id_ligacao=370001, operador_nome="OP RATIO", status="done", categoria="SEM_INTERESSE",
+            Call(id_ligacao=370001, operador_nome="OP RATIO", status="avaliada", categoria="SEM_INTERESSE",
                  divergencia_tabulacao=True, data_ligacao=datetime(2025, 2, 1, 9)),
-            Call(id_ligacao=370002, operador_nome="OP RATIO", status="pending", data_ligacao=datetime(2025, 2, 1, 9)),
+            Call(id_ligacao=370002, operador_nome="OP RATIO", status="pendente", data_ligacao=datetime(2025, 2, 1, 9)),
         ])
         db.commit()
     s = client.get("/api/v1/analytics/summary", params={"operador": "OP RATIO"}).json()

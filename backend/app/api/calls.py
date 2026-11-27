@@ -10,10 +10,10 @@ from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .auth import nome_do_usuario
-from ..models import Call, Tabulacao
-from ..services import qualidade, tabulacoes
+from ..models import Avaliacao, Call, Tabulacao
+from ..services import avaliacoes, tabulacoes
 from ..taxonomy import CATEGORIES, label_cat, label_sub, valid
+from .auth import exigir_papel
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
 
@@ -75,16 +75,17 @@ def apply_filters(
         stmt = stmt.where(Call.divergencia_gravidade == gravidade)
     if nao_ligar is not None:
         stmt = stmt.where(Call.pediu_nao_ligar.is_(True) if nao_ligar else Call.pediu_nao_ligar.is_not(True))
-    if revisao is not None:  # fila de revisão humana: casos duvidosos + amostra aleatória não revisada
-        stmt = stmt.where(qualidade.cond_fila() if revisao else ~qualidade.cond_fila())
-    if revisado is not None:
-        stmt = stmt.where(Call.revisado_em.is_not(None) if revisado else Call.revisado_em.is_(None))
+    if revisao is not None:  # fila de avaliação (o nome "revisao" ficou da versão anterior)
+        fila = Call.status == avaliacoes.PENDENTE_AVALIACAO
+        stmt = stmt.where(fila if revisao else ~fila)
+    if revisado is not None:  # a monitora já deu o veredito (avaliada ou não avaliável)
+        fim = Call.status.in_(avaliacoes.FINALIZADAS)
+        stmt = stmt.where(fim if revisado else ~fim)
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
             Call.nome_esperado.ilike(like)
             | Call.cliente_identificado.ilike(like)
-            | Call.transcricao.ilike(like)
             | Call.telefone.contains(like)
             | Call.operador_nome.ilike(like)
             | Call.tabulacao_operador.ilike(like)
@@ -97,7 +98,14 @@ def _confirmadas(db: Session) -> set[int]:
     return set(db.scalars(select(Tabulacao.id).where(Tabulacao.confirmada.is_(True))))
 
 
-def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None) -> dict:
+def _avaliacoes_de(db: Session, calls) -> dict[int, Avaliacao]:
+    ids = {c.avaliacao_id for c in calls if c.avaliacao_id}
+    return {a.id: a for a in db.scalars(select(Avaliacao).where(Avaliacao.id.in_(ids)))} if ids else {}
+
+
+def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None,
+              avals: dict[int, Avaliacao] | None = None) -> dict:
+    a = (avals or {}).get(c.avaliacao_id) if c.avaliacao_id else None
     d = {
         "id": c.id,
         "id_ligacao": c.id_ligacao,
@@ -122,15 +130,11 @@ def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None) 
         "duracao_segundos": c.duracao_segundos,
         "origem": c.origem,
         "status": c.status,
+        "avaliada": c.status == avaliacoes.AVALIADA,
         "categoria": c.categoria,
         "categoria_label": label_cat(c.categoria) if c.categoria else None,
         "subcategoria": c.subcategoria,
         "subcategoria_label": label_sub(c.categoria, c.subcategoria) if c.categoria else None,
-        "confianca": c.confianca,
-        "motor": c.motor,
-        "resumo": c.resumo,
-        "evidencia": c.evidencia,
-        "sentimento_cliente": c.sentimento_cliente,
         "conflito_identidade": c.conflito_identidade,
         "divergencia_tabulacao": bool(c.divergencia_tabulacao),
         "divergencia_detalhe": c.divergencia_detalhe,
@@ -138,32 +142,14 @@ def serialize(c: Call, full: bool = False, confirmadas: set[int] | None = None) 
         "pediu_nao_ligar": bool(c.pediu_nao_ligar),
         "tabulacao_id": c.tabulacao_id,
         "tabulacao_confirmada": (c.tabulacao_id in confirmadas) if confirmadas is not None and c.tabulacao_id else None,
-        "precisa_revisao": bool(c.precisa_revisao),
-        "motivo_fila": qualidade.motivo_fila(c),
-        "na_amostra": bool(c.na_amostra),
-        "categoria_ia": c.categoria_ia,
-        "subcategoria_ia": c.subcategoria_ia,
-        "categoria_ia_label": label_cat(c.categoria_ia) if c.categoria_ia else None,
-        "subcategoria_ia_label": label_sub(c.categoria_ia, c.subcategoria_ia) if c.categoria_ia and c.subcategoria_ia else None,
-        "revisado": c.revisado_em is not None,
-        "revisado_por": c.revisado_por,
-        "revisado_em": c.revisado_em.isoformat() if c.revisado_em else None,
-        "revisao_observacao": c.revisao_observacao,
-        "ia_acertou": (c.categoria_ia == c.categoria_revisada) if c.categoria_ia and c.categoria_revisada else None,
-        "revisao_motivo": c.revisao_motivo,
-        "fala_segundos": c.fala_segundos,
-        "custo_usd": round(c.custo_usd or 0, 5),
+        "avaliado_por": a.monitora_nome if a else None,
+        "avaliado_em": a.finalizada_em.isoformat() if a and a.finalizada_em else None,
         "ligacao_referencia_id": c.ligacao_referencia_id,
         "tem_audio": bool(c.caminho_audio),
         "erro": c.erro,
     }
     if full:
-        d.update(
-            transcricao=c.transcricao,
-            transcricao_diarizada=c.transcricao_diarizada,
-            metricas_acusticas=c.metricas_acusticas,
-            nome_arquivo=c.nome_arquivo,
-        )
+        d.update(avaliacao=avaliacoes.serializar(a), nome_arquivo=c.nome_arquivo)
     return d
 
 
@@ -215,11 +201,16 @@ def list_calls(
     if ordenar == "gravidade":  # alta, média, baixa e depois o resto; dentro de cada uma, as mais recentes
         ordem.insert(0, case({"alta": 0, "media": 1, "baixa": 2}, value=Call.divergencia_gravidade, else_=3))
     rows = db.scalars(base.order_by(*ordem).offset((page - 1) * page_size).limit(page_size))
-    conf = _confirmadas(db)
-    return {"total": total, "page": page, "page_size": page_size, "items": [serialize(c, confirmadas=conf) for c in rows]}
+    rows = rows.all()
+    conf, avals = _confirmadas(db), _avaliacoes_de(db, rows)
+    return {"total": total, "page": page, "page_size": page_size,
+            "items": [serialize(c, confirmadas=conf, avals=avals) for c in rows]}
 
 
 EXPORT_LIMITE = 50000
+STATUS_LABEL = {"pendente": "Aguardando gravação", "pendente_avaliacao": "Aguardando avaliação",
+                "em_avaliacao": "Em avaliação", "avaliada": "Avaliada", "nao_avaliavel": "Não avaliável",
+                "erro": "Erro no download"}
 
 
 @router.get("/calls/export")
@@ -228,13 +219,15 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
     rows = db.scalars(f(select(Call)).order_by(Call.data_ligacao.desc()).limit(EXPORT_LIMITE + 1)).all()
     truncado = len(rows) > EXPORT_LIMITE
     rows = rows[:EXPORT_LIMITE]
+    avals = _avaliacoes_de(db, rows)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
     writer.writerow([
         "ID Ligação", "Data/Hora", "Telefone", "Cliente", "Operador", "Tipo Agente", "Origem Discagem", "Tronco",
-        "Desligado Por", "Sinalização SIP", "Tabulação Operador", "Categoria IA", "Subcategoria IA", "Confiança",
-        "Divergência?", "Gravidade", "Detalhe Divergência", "Pediu p/ não ligar?", "Revisar?", "Motivo da Revisão", "Duração (seg)", "Sentimento Cliente", "Status", "Resumo",
+        "Desligado Por", "Sinalização SIP", "Tabulação Operador", "Resultado (monitoria)", "Subcategoria",
+        "Divergência?", "Gravidade", "Detalhe Divergência", "Pediu p/ não ligar?", "Duração (seg)", "Status",
+        "Avaliada por", "Avaliada em",
     ])
     for c in rows:
         writer.writerow([
@@ -251,17 +244,14 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
             c.tabulacao_operador or "",
             label_cat(c.categoria) if c.categoria else "",
             label_sub(c.categoria, c.subcategoria) if c.categoria else "",
-            f"{c.confianca:.2f}".replace(".", ",") if c.confianca is not None else "",
             "SIM" if c.divergencia_tabulacao else "NÃO",
             {"alta": "Alta", "media": "Média", "baixa": "Baixa"}.get(c.divergencia_gravidade or "", ""),
             c.divergencia_detalhe or "",
             "SIM" if c.pediu_nao_ligar else "NÃO",
-            "SIM" if c.precisa_revisao else "NÃO",
-            c.revisao_motivo or "",
             f"{c.duracao_segundos:.1f}".replace(".", ",") if c.duracao_segundos else "0",
-            c.sentimento_cliente or "",
-            c.status,
-            c.resumo or "",
+            STATUS_LABEL.get(c.status, c.status),
+            (a := avals.get(c.avaliacao_id)) and a.monitora_nome or "",
+            a.finalizada_em.strftime("%d/%m/%Y %H:%M") if a and a.finalizada_em else "",
         ])
     return Response(
         content=output.getvalue().encode("utf-8-sig"),
@@ -271,58 +261,51 @@ def export_calls_csv(f: Filtros = Depends(), db: Session = Depends(get_db)):
     )
 
 
-@router.get("/calls/{call_id}")
-def get_call(call_id: int, db: Session = Depends(get_db)):
-    c = db.get(Call, call_id)
-    if not c:
-        raise HTTPException(404, "Ligação não encontrada")
-    out = serialize(c, full=True, confirmadas=_confirmadas(db))
+def _detalhe(db: Session, c: Call) -> dict:
+    out = serialize(c, full=True, confirmadas=_confirmadas(db), avals=_avaliacoes_de(db, [c]))
     if c.ligacao_referencia_id and (ref := db.get(Call, c.ligacao_referencia_id)):
         out["ligacao_referencia"] = serialize(ref)
     return out
 
 
-class RevisaoIn(BaseModel):
-    categoria: str
+@router.get("/calls/{call_id}")
+def get_call(call_id: int, db: Session = Depends(get_db)):
+    c = db.get(Call, call_id)
+    if not c:
+        raise HTTPException(404, "Ligação não encontrada")
+    return _detalhe(db, c)
+
+
+class ResultadoIn(BaseModel):
+    categoria: str | None = None
     subcategoria: str | None = None
-    revisor: str | None = None  # com login ligado, vale o nome do usuário da sessão
-    observacao: str | None = None
+    pediu_nao_ligar: bool = False
+    nao_avaliavel: bool = False
+    motivo: str | None = None  # obrigatório quando não avaliável
 
     @model_validator(mode="after")
     def _validar(self):
-        if not valid(self.categoria, self.subcategoria):
+        if self.nao_avaliavel:
+            if not (self.motivo or "").strip():
+                raise ValueError("Informe por que a ligação não pode ser avaliada.")
+        elif not self.categoria or not valid(self.categoria, self.subcategoria):
             raise ValueError("Categoria/subcategoria fora da taxonomia.")
         return self
 
 
-@router.post("/calls/{call_id}/revisao")
-def revisar(call_id: int, r: RevisaoIn, request: Request, db: Session = Depends(get_db)):
-    """Revisão humana: confirma ou corrige o resultado da IA. Vira o resultado da ligação e o gabarito da medição."""
+@router.post("/calls/{call_id}/resultado")
+def registrar_resultado(call_id: int, r: ResultadoIn, request: Request, db: Session = Depends(get_db),
+                        _u=Depends(exigir_papel("monitora", "admin"))):
+    """A monitora registra (ou corrige) o resultado da ligação: vira o resultado e entra na divergência."""
     c = db.get(Call, call_id)
     if not c:
         raise HTTPException(404, "Ligação não encontrada")
-    if c.status != "done" or not c.categoria:
-        raise HTTPException(409, "A ligação ainda não foi analisada.")
-    revisor = nome_do_usuario(request) or (r.revisor or "").strip()
-    if not revisor:
-        raise HTTPException(422, "Informe quem está revisando.")
-    qualidade.revisar(db, c, r.categoria, r.subcategoria, revisor, r.observacao)
+    if c.status in (avaliacoes.PENDENTE, avaliacoes.ERRO) and not c.caminho_audio:
+        raise HTTPException(409, "A gravação desta ligação ainda não foi baixada.")
+    avaliacoes.registrar_resultado(db, c, r.categoria, r.subcategoria, r.pediu_nao_ligar, r.nao_avaliavel, r.motivo,
+                                   usuario=getattr(request.state, "usuario", None))
     db.commit()
-    return serialize(c, full=True, confirmadas=_confirmadas(db))
-
-
-@router.delete("/calls/{call_id}/revisao")
-def desfazer_revisao(call_id: int, db: Session = Depends(get_db)):
-    c = db.get(Call, call_id)
-    if not c:
-        raise HTTPException(404, "Ligação não encontrada")
-    if c.revisado_em is None:
-        raise HTTPException(409, "Esta ligação não foi revisada.")
-    if c.categoria_ia is None:
-        raise HTTPException(409, "Sem resposta da IA para voltar (resultado veio da escuta manual).")
-    qualidade.desfazer(db, c)
-    db.commit()
-    return serialize(c, full=True, confirmadas=_confirmadas(db))
+    return _detalhe(db, c)
 
 
 @router.get("/calls/{call_id}/audio")
@@ -380,8 +363,8 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
     total = db.scalar(f(select(func.count(Call.id)))) or 0
     by_status = dict(db.execute(f(select(Call.status, func.count()).group_by(Call.status))).all())
 
-    done = Call.status == "done"
-    rows = db.execute(f(select(Call.categoria, Call.subcategoria, func.count()).where(done)
+    avaliada = Call.status == avaliacoes.AVALIADA  # só a avaliação finalizada tem resultado
+    rows = db.execute(f(select(Call.categoria, Call.subcategoria, func.count()).where(avaliada)
                         .group_by(Call.categoria, Call.subcategoria))).all()
     cats: dict[str, dict] = {}
     for cat, sub, n in rows:
@@ -395,34 +378,36 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
         c["pct"] = round(100 * c["total"] / qualificadas, 1) if qualificadas else 0
         c["subs"].sort(key=lambda s: -s["total"])
 
-    dur_media = db.scalar(f(select(func.avg(Call.duracao_segundos)).where(done)))
-    dur_total = db.scalar(f(select(func.sum(Call.duracao_segundos)).where(done))) or 0
-    conf_media = db.scalar(f(select(func.avg(Call.confianca)).where(done, Call.motor == "openai")))
+    dur_media = db.scalar(f(select(func.avg(Call.duracao_segundos))))
+    dur_total = db.scalar(f(select(func.sum(Call.duracao_segundos)))) or 0
+    nao_avaliadas = sum(n for st, n in by_status.items() if st in avaliacoes.NAO_AVALIADAS)
 
-    # Divergência: só faz sentido entre ligações qualificadas E tabuladas pelo operador
-    comparaveis = db.scalar(f(select(func.count(Call.id)).where(done, Call.tabulacao_operador.is_not(None)))) or 0
-    total_div = db.scalar(f(select(func.count(Call.id)).where(done, Call.divergencia_tabulacao.is_(True)))) or 0
+    # Divergência: só faz sentido entre ligações avaliadas E tabuladas pelo operador
+    comparaveis = db.scalar(f(select(func.count(Call.id)).where(avaliada, Call.tabulacao_operador.is_not(None)))) or 0
+    total_div = db.scalar(f(select(func.count(Call.id)).where(avaliada, Call.divergencia_tabulacao.is_(True)))) or 0
 
     matriz_rows = db.execute(f(
-        select(Call.tabulacao_operador, Call.categoria, func.count())
+        select(Call.tabulacao_operador, Call.status, Call.categoria, func.count())
         .where(Call.tabulacao_operador.is_not(None))
-        .group_by(Call.tabulacao_operador, Call.categoria)
+        .group_by(Call.tabulacao_operador, Call.status, Call.categoria)
     )).all()
     regras = tabulacoes.regras_por_chave(db)
     matriz: dict[str, dict] = {}
-    for tab_op, cat_ia, n in matriz_rows:
+    for tab_op, st, cat, n in matriz_rows:
         if tab_op not in matriz:
             regra = regras.get(tabulacoes.chave(tab_op)) or tabulacoes.sugerir(tab_op)
             matriz[tab_op] = {"tabulacao_operador": tab_op, "esperada": regra.codigo, "esperadas": regra.categorias,
                               "tipo": regra.tipo, "confirmada": regra.confirmada, "total": 0, "categorias": {}}
         e = matriz[tab_op]
         e["total"] += n
-        e["categorias"][cat_ia or "PENDENTE"] = n
+        chave_cat = (cat if st == avaliacoes.AVALIADA and cat else
+                     "NAO_AVALIAVEL" if st == avaliacoes.NAO_AVALIAVEL else "NAO_AVALIADA")
+        e["categorias"][chave_cat] = e["categorias"].get(chave_cat, 0) + n
 
     div_int = case((Call.divergencia_tabulacao.is_(True), 1), else_=0)
     op_rows = db.execute(f(
-        select(Call.operador_nome, func.count(Call.id), func.sum(case((done, 1), else_=0)),
-               func.sum(case((done, div_int), else_=0)))
+        select(Call.operador_nome, func.count(Call.id), func.sum(case((avaliada, 1), else_=0)),
+               func.sum(case((avaliada, div_int), else_=0)))
         .where(Call.operador_nome.is_not(None))
         .group_by(Call.operador_nome)
         .order_by(func.count(Call.id).desc())
@@ -431,16 +416,19 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
     ranking = []
     for nome, tot, qual, div in op_rows:
         qual, div = qual or 0, div or 0
-        ranking.append({"operador": nome, "total": tot, "qualificadas": qual, "divergencias": div,
+        ranking.append({"operador": nome, "total": tot, "qualificadas": qual, "avaliadas": qual, "divergencias": div,
                         "taxa_divergencia": round(100 * div / qual, 1) if qual else 0})
 
     return {
         "total": total,
-        "qualificadas": qualificadas,
+        "qualificadas": qualificadas,  # = avaliadas com resultado (nome mantido por compatibilidade)
+        "avaliadas": qualificadas,
+        "nao_avaliadas": nao_avaliadas,
+        "nao_avaliaveis": by_status.get(avaliacoes.NAO_AVALIAVEL, 0),
+        "aguardando_avaliacao": by_status.get(avaliacoes.PENDENTE_AVALIACAO, 0),
         "status": by_status,
         "duracao_media": round(dur_media or 0, 1),
         "duracao_total_horas": round(dur_total / 3600, 2),
-        "confianca_media": round(conf_media, 2) if conf_media is not None else None,
         "conflitos_identidade": db.scalar(f(select(func.count(Call.id)).where(Call.conflito_identidade.is_(True)))) or 0,
         "desligamentos": _distribuicao(db, f, Call.desligado_por, "tipo"),
         "agentes": _distribuicao(db, f, Call.tipo_agente, "tipo"),
@@ -450,13 +438,10 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
         "divergencias": {"total": total_div, "comparaveis": comparaveis,
                          "por_gravidade": {g: n for g, n in (("alta", 0), ("media", 0), ("baixa", 0))}
                          | dict(db.execute(f(select(Call.divergencia_gravidade, func.count())
-                                             .where(done, Call.divergencia_tabulacao.is_(True),
+                                             .where(avaliada, Call.divergencia_tabulacao.is_(True),
                                                     Call.divergencia_gravidade.is_not(None))
                                              .group_by(Call.divergencia_gravidade))).all()),
                          "taxa": round(100 * total_div / comparaveis, 1) if comparaveis else 0},
-        "revisao": db.scalar(f(select(func.count(Call.id)).where(qualidade.cond_fila()))) or 0,
-        "sem_ia": db.scalar(f(select(func.count(Call.id)).where(Call.motor == "local"))) or 0,
-        "custo_usd": round(db.scalar(f(select(func.coalesce(func.sum(Call.custo_usd), 0.0)))) or 0, 4),
         "matriz_contraste": sorted(matriz.values(), key=lambda x: -x["total"])[:15],
         "ranking_operadores": ranking,
         "categorias": sorted(cats.values(), key=lambda c: -c["total"]),
@@ -465,9 +450,9 @@ def summary(f: Filtros = Depends(), db: Session = Depends(get_db)):
 
 @router.get("/analytics/timeline")
 def timeline(f: Filtros = Depends(), db: Session = Depends(get_db)):
-    """Volume diário por categoria, com os MESMOS filtros dos cards e da tabela."""
+    """Volume diário de ligações avaliadas por categoria, com os MESMOS filtros dos cards e da tabela."""
     day = func.date(Call.data_ligacao)
-    stmt = f(select(day, Call.categoria, func.count()).where(Call.status == "done", Call.data_ligacao.is_not(None)))
+    stmt = f(select(day, Call.categoria, func.count()).where(Call.status == avaliacoes.AVALIADA, Call.data_ligacao.is_not(None)))
     out: dict[str, dict] = {}
     for d, cat, n in db.execute(stmt.group_by(day, Call.categoria)).all():
         out.setdefault(str(d), {"data": str(d)})[cat] = n
@@ -478,7 +463,7 @@ def timeline(f: Filtros = Depends(), db: Session = Depends(get_db)):
 def por_hora(f: Filtros = Depends(), db: Session = Depends(get_db)):
     """Distribuição por hora do dia × categoria (mapa de calor de contato)."""
     hora = extract("hour", Call.data_ligacao)
-    stmt = f(select(hora, Call.categoria, func.count()).where(Call.status == "done", Call.data_ligacao.is_not(None)))
+    stmt = f(select(hora, Call.categoria, func.count()).where(Call.status == avaliacoes.AVALIADA, Call.data_ligacao.is_not(None)))
     out = {h: {"hora": h} for h in range(24)}
     for h, cat, n in db.execute(stmt.group_by(hora, Call.categoria)).all():
         if h is not None and cat:

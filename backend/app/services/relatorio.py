@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Alerta, Call, IaUso, Relatorio, agora
-from . import notificacoes, qualidade
+from ..models import Alerta, Avaliacao, Call, Relatorio, agora
+from . import notificacoes
 
 
 def _dias_permitidos() -> set[int]:
@@ -38,27 +38,26 @@ def gerar(db: Session, dia: date) -> Relatorio:
     operadores = sorted((o for o in s["ranking_operadores"] if o["qualificadas"] >= 5 or o["divergencias"]),
                         key=lambda o: (-o["divergencias"], -o["taxa_divergencia"]))[:5]
     altas_op = dict(db.execute(select(Call.operador_nome, func.count(Call.id)).where(
-        Call.data_ligacao >= ini, Call.data_ligacao < fim, Call.divergencia_gravidade == "alta")
+        Call.data_ligacao >= ini, Call.data_ligacao < fim, Call.status == "avaliada", Call.divergencia_gravidade == "alta")
         .group_by(Call.operador_nome)).all())
     for o in operadores:
         o["altas"] = altas_op.get(o["operador"], 0)
     mudas = {c["codigo"]: c for c in s["categorias"]}.get("LIGACAO_MUDA")
-    q7 = qualidade.medir(db, desde=agora() - timedelta(days=7))
     dados = {
         "data": dia.isoformat(),
         "total": s["total"],
         "qualificadas": s["qualificadas"],
+        "nao_avaliadas": s["nao_avaliadas"],
         "divergencias": s["divergencias"],
         "categorias": [{"codigo": c["codigo"], "label": c["label"], "total": c["total"], "pct": c["pct"]} for c in s["categorias"]],
         "mudas_pct": mudas["pct"] if mudas else 0,
         "operadores": operadores,
         "troncos": s["troncos"][:5],
         "nao_ligar": s["nao_ligar"],
-        "fila_revisao": s["revisao"],
-        "revisadas_no_dia": db.scalar(select(func.count(Call.id)).where(Call.revisado_em >= ini, Call.revisado_em < fim)) or 0,
-        "acuracia_7d": {"acuracia": q7["acuracia"], "avaliadas": q7["avaliadas"]},
-        "custo_usd": round(db.scalar(select(func.coalesce(func.sum(IaUso.custo_usd), 0.0))
-                                     .where(IaUso.em >= ini, IaUso.em < fim)) or 0, 2),
+        "aguardando_avaliacao": db.scalar(select(func.count(Call.id)).where(Call.status == "pendente_avaliacao")) or 0,
+        "avaliadas_no_dia": db.scalar(select(func.count(Avaliacao.id)).where(
+            Avaliacao.status.in_(("finalizada", "nao_avaliavel")), Avaliacao.finalizada_em >= ini,
+            Avaliacao.finalizada_em < fim)) or 0,
         "alertas_abertos": [{"nivel": a.nivel, "titulo": a.titulo, "mensagem": a.mensagem}
                             for a in db.scalars(select(Alerta).where(Alerta.resolvido_em.is_(None))
                                                 .order_by(Alerta.nivel, Alerta.aberto_em))],
@@ -87,7 +86,7 @@ def texto(d: dict) -> str:
     div = d["divergencias"]
     g = div["por_gravidade"]
     linhas = [
-        f"📞 {_br(d['total'])} ligações · {_br(d['qualificadas'])} analisadas",
+        f"📞 {_br(d['total'])} ligações · {_br(d['qualificadas'])} avaliadas · {_br(d.get('nao_avaliadas', 0))} não avaliadas",
         f"⚠️ Divergência de tabulação: {_br(div['taxa'], 1)}% ({_br(div['total'])}: {g.get('alta', 0)} alta, "
         f"{g.get('media', 0)} média, {g.get('baixa', 0)} baixa)",
         f"🔇 Ligações mudas: {_br(d['mudas_pct'], 1)}%",
@@ -98,11 +97,8 @@ def texto(d: dict) -> str:
         linhas.append("\nOperadores com mais divergências:")
         linhas += [f"• {o['operador']}: {o['divergencias']} de {o['qualificadas']} ({_br(o['taxa_divergencia'], 0)}%)"
                    + (f", {o['altas']} alta(s)" if o["altas"] else "") for o in d["operadores"]]
-    linhas.append(f"\n👂 Fila de revisão: {_br(d['fila_revisao'])} · revisadas no dia: {_br(d['revisadas_no_dia'])}")
-    a7 = d["acuracia_7d"]
-    if a7["avaliadas"]:
-        linhas.append(f"🎯 Acerto da IA (7 dias): {_br(a7['acuracia'], 1)}% em {_br(a7['avaliadas'])} revisões")
-    linhas.append(f"💸 Custo de IA no dia: US$ {_br(d['custo_usd'], 2)}")
+    linhas.append(f"\n👂 Aguardando avaliação: {_br(d['aguardando_avaliacao'])} · "
+                  f"avaliadas pela monitoria no dia: {_br(d['avaliadas_no_dia'])}")
     if d["alertas_abertos"]:
         linhas.append("\nAlertas abertos:")
         linhas += [f"{'🔴' if a['nivel'] == 'critico' else '🟠'} {a['titulo']}" for a in d["alertas_abertos"]]
@@ -118,9 +114,9 @@ def html(rel: Relatorio) -> str:
     div = d["divergencias"]
     td = 'style="padding:6px 10px;border-bottom:1px solid #e1e0d9"'
     num = 'style="padding:6px 10px;border-bottom:1px solid #e1e0d9;text-align:right"'
-    kpis = [("Ligações", _br(d["total"])), ("Analisadas", _br(d["qualificadas"])),
-            ("Divergência", f"{_br(div['taxa'], 1)}%"), ("Mudas", f"{_br(d['mudas_pct'], 1)}%"),
-            ("Não ligar", _br(d["nao_ligar"])), ("Custo IA", f"US$ {_br(d['custo_usd'], 2)}")]
+    kpis = [("Ligações", _br(d["total"])), ("Avaliadas", _br(d["qualificadas"])),
+            ("Não avaliadas", _br(d.get("nao_avaliadas", 0))), ("Divergência", f"{_br(div['taxa'], 1)}%"),
+            ("Mudas", f"{_br(d['mudas_pct'], 1)}%"), ("Não ligar", _br(d["nao_ligar"]))]
     ops = "".join(f"<tr><td {td}>{escape(o['operador'])}</td><td {num}>{o['divergencias']} de {o['qualificadas']}</td>"
                   f"<td {num}>{_br(o['taxa_divergencia'], 0)}%</td><td {num}>{o['altas']}</td></tr>" for o in d["operadores"])
     cats = "".join(f"<tr><td {td}>{escape(c['label'])}</td><td {num}>{_br(c['total'])}</td><td {num}>{_br(c['pct'], 1)}%</td></tr>"
@@ -131,17 +127,17 @@ def html(rel: Relatorio) -> str:
     return f"""<!doctype html><html><body style="margin:0;background:#f9f9f7;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0b0b0b">
 <div style="max-width:640px;margin:0 auto;padding:24px">
 <h1 style="font-size:20px;margin:0 0 4px">Crivo · relatório de {_dia(d['data'])}</h1>
-<p style="color:#52514e;margin:0 0 16px">Tabulação do operador × análise da gravação</p>
+<p style="color:#52514e;margin:0 0 16px">Tabulação do operador × resultado da monitoria</p>
 <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e1e0d9;border-radius:12px"><tr>
 {''.join(f'<td style="padding:12px;text-align:center"><div style="font-size:12px;color:#52514e">{k}</div><div style="font-size:20px;font-weight:600">{v}</div></td>' for k, v in kpis)}
 </tr></table>
 <p style="margin:16px 0 4px;color:#52514e">Divergências por gravidade: <b>{g.get('alta', 0)} alta</b> · {g.get('media', 0)} média · {g.get('baixa', 0)} baixa</p>
 <h2 style="font-size:15px;margin:20px 0 6px">Operadores com mais divergências</h2>
 <table style="width:100%;border-collapse:collapse;background:#fff"><tr><th {td} align="left">Operador</th><th {num}>Divergentes</th><th {num}>Taxa</th><th {num}>Altas</th></tr>{ops or f'<tr><td {td} colspan="4">Nenhum</td></tr>'}</table>
-<h2 style="font-size:15px;margin:20px 0 6px">Resultado das ligações</h2>
+<h2 style="font-size:15px;margin:20px 0 6px">Resultado das ligações avaliadas</h2>
 <table style="width:100%;border-collapse:collapse;background:#fff"><tr><th {td} align="left">Categoria</th><th {num}>Ligações</th><th {num}>%</th></tr>{cats}</table>
 {f'<h2 style="font-size:15px;margin:20px 0 6px">Alertas abertos</h2><ul>{alertas}</ul>' if alertas else ''}
-<p style="color:#52514e;font-size:13px;margin-top:20px">Fila de revisão: {_br(d['fila_revisao'])} · revisadas no dia: {_br(d['revisadas_no_dia'])}</p>
+<p style="color:#52514e;font-size:13px;margin-top:20px">Aguardando avaliação: {_br(d.get('aguardando_avaliacao', d.get('fila_revisao', 0)))} · avaliadas no dia: {_br(d.get('avaliadas_no_dia', d.get('revisadas_no_dia', 0)))}</p>
 </div></body></html>"""
 
 

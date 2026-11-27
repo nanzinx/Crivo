@@ -13,7 +13,6 @@ WEBHOOK = "argus_webhook"
 POLLING = "argus_polling"
 SYNC_MANUAL = "argus_sync"
 DOWNLOAD = "argus_download"
-IA = "ia"
 IMPORTACAO = "importacao_local"
 CRUZAMENTO = "cruzamento"
 

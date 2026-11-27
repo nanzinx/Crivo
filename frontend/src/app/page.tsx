@@ -140,13 +140,13 @@ function Dashboard() {
           delay={0.16}
         />
         <StatTile
-          label="Revisão humana"
-          value={s?.revisao}
+          label="Aguardando avaliação"
+          value={s?.aguardando_avaliacao}
           format={fmtInt}
           loading={loading}
-          tone={s && s.revisao > 0 ? "warn" : undefined}
+          tone={s && s.aguardando_avaliacao > 0 ? "warn" : undefined}
           icon={<Ear className="h-4 w-4" />}
-          hint="IA sem segurança: alguém precisa ouvir"
+          hint="Gravações na fila da monitoria"
           onClick={() => setFilters({ revisao: f.revisao === "true" ? "" : "true" })}
           active={f.revisao === "true"}
           delay={0.2}
@@ -162,7 +162,7 @@ function Dashboard() {
       ) : (
         <>
           <div className="grid gap-4 lg:grid-cols-5">
-            <Card title="Resultado das ligações" subtitle="Classificação da IA sobre a gravação" className="lg:col-span-2" delay={0.05}>
+            <Card title="Resultado das ligações" subtitle="Avaliação da monitoria sobre a gravação" className="lg:col-span-2" delay={0.05}>
               {s ? (
                 <CategoryBreakdown
                   data={s.categorias}
@@ -189,7 +189,7 @@ function Dashboard() {
           <div className="grid gap-4 xl:grid-cols-5">
             <Card
               title="Matriz de contraste"
-              subtitle="Como cada tabulação do operador foi classificada pela IA"
+              subtitle="Como a monitoria avaliou cada tabulação do operador"
               className="xl:col-span-3"
               delay={0.05}
             >

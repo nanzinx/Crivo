@@ -2,12 +2,12 @@
   "name": "crivo-web",
   "version": "0.2.0",
   "private": true,
-  "description": "Crivo — painel de auditoria de ligações (Argus × IA)",
+  "description": "Crivo — painel de monitoria de qualidade das ligações (Argus × monitoria humana)",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

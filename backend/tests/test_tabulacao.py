@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import Call, Tabulacao
-from app.services import ai_qualifier, pipeline, tabulacoes
+from app.services import avaliacoes, pipeline, tabulacoes
 from app.taxonomy import TAXONOMIA_VERSAO, valid
 
 
@@ -36,8 +36,8 @@ def test_chave_ignora_acento_caixa_e_espacos():
 # --------------------------------------------------------------------------- catálogo
 def test_catalogo_registra_cada_tabulacao_uma_vez_e_liga_as_ligacoes():
     with SessionLocal() as db:
-        a = Call(id_ligacao=610001, tabulacao_operador="Ligação Muda / Caixa Postal (catálogo)", status="pending")
-        b = Call(id_ligacao=610002, tabulacao_operador="LIGACAO MUDA/CAIXA POSTAL  (CATALOGO) ", status="pending")
+        a = Call(id_ligacao=610001, tabulacao_operador="Ligação Muda / Caixa Postal (catálogo)", status="pendente")
+        b = Call(id_ligacao=610002, tabulacao_operador="LIGACAO MUDA/CAIXA POSTAL  (CATALOGO) ", status="pendente")
         db.add_all([a, b])
         db.flush()
         pipeline.atualizar_divergencia(db, a)
@@ -51,12 +51,12 @@ def test_catalogo_registra_cada_tabulacao_uma_vez_e_liga_as_ligacoes():
 
 def test_id_do_argus_tem_prioridade_e_e_anexado_ao_texto_existente():
     with SessionLocal() as db:
-        a = Call(id_ligacao=610011, tabulacao_operador="Sem interesse (cód)", status="pending")
+        a = Call(id_ligacao=610011, tabulacao_operador="Sem interesse (cód)", status="pendente")
         db.add(a)
         db.flush()
         pipeline.atualizar_divergencia(db, a)
-        b = Call(id_ligacao=610012, tabulacao_operador="Sem interesse (cód)", id_tabulacao_argus=9911, status="pending")
-        c = Call(id_ligacao=610013, tabulacao_operador="Texto renomeado no Argus", id_tabulacao_argus=9911, status="pending")
+        b = Call(id_ligacao=610012, tabulacao_operador="Sem interesse (cód)", id_tabulacao_argus=9911, status="pendente")
+        c = Call(id_ligacao=610013, tabulacao_operador="Texto renomeado no Argus", id_tabulacao_argus=9911, status="pendente")
         db.add_all([b, c])
         db.flush()
         pipeline.atualizar_divergencia(db, b)
@@ -72,34 +72,34 @@ def _regra(**kw):
     return tabulacoes.Regra(**{**base, **kw})
 
 
-def _qualificada(cat, sub=None, conf=0.9, **kw):
-    return Call(tabulacao_operador="X", status="done", categoria=cat, subcategoria=sub, confianca=conf, **kw)
+def _avaliada(cat, sub=None, **kw):
+    return Call(tabulacao_operador="X", status="avaliada", categoria=cat, subcategoria=sub, **kw)
 
 
 def test_tabulacao_que_aceita_mais_de_uma_categoria():
     r = _regra(categorias=["LIGACAO_MUDA", "CAIXA_POSTAL"])
     for cat in ("LIGACAO_MUDA", "CAIXA_POSTAL"):
-        c = _qualificada(cat)
+        c = _avaliada(cat)
         pipeline.calcular_divergencia(c, r)
         assert c.divergencia_tabulacao is False
-    c = _qualificada("SEM_INTERESSE")
+    c = _avaliada("SEM_INTERESSE")
     pipeline.calcular_divergencia(c, r)
     assert c.divergencia_tabulacao is True
 
 
 def test_tabulacao_ignorada_nunca_gera_divergencia():
-    c = _qualificada("EM_NEGOCIACAO")
+    c = _avaliada("EM_NEGOCIACAO")
     pipeline.calcular_divergencia(c, _regra(tipo="ignorar", categorias=[]))
     assert c.divergencia_tabulacao is False and c.tabulacao_normalizada == "OUTRO"
 
 
 def test_subcategoria_mapeada_gera_divergencia_baixa():
     r = _regra(categorias=["EM_NEGOCIACAO"], subcategoria="AGENDAMENTO_RETORNO")
-    c = _qualificada("EM_NEGOCIACAO", "PROPOSTA_EM_ANDAMENTO")
+    c = _avaliada("EM_NEGOCIACAO", "PROPOSTA_EM_ANDAMENTO")
     pipeline.calcular_divergencia(c, r)
     assert c.divergencia_tabulacao is True and c.divergencia_gravidade == "baixa"
     assert "subcategoria" in c.divergencia_detalhe.lower()
-    ok = _qualificada("EM_NEGOCIACAO", "AGENDAMENTO_RETORNO")
+    ok = _avaliada("EM_NEGOCIACAO", "AGENDAMENTO_RETORNO")
     pipeline.calcular_divergencia(ok, r)
     assert ok.divergencia_tabulacao is False and ok.divergencia_gravidade is None
 
@@ -120,33 +120,27 @@ def test_subcategoria_mapeada_gera_divergencia_baixa():
     ("resultado", ["CAIXA_POSTAL"], "LIGACAO_MUDA", "baixa"),
 ])
 def test_gravidade_da_divergencia(tipo, esperadas, ia, gravidade):
-    c = _qualificada(ia)
+    c = _avaliada(ia)
     pipeline.calcular_divergencia(c, _regra(tipo=tipo, categorias=esperadas))
     assert c.divergencia_tabulacao is True and c.divergencia_gravidade == gravidade
 
 
 def test_coerente_limpa_gravidade_antiga():
-    c = _qualificada("SEM_INTERESSE", divergencia_gravidade="alta", divergencia_tabulacao=True)
+    c = _avaliada("SEM_INTERESSE", divergencia_gravidade="alta", divergencia_tabulacao=True)
     pipeline.calcular_divergencia(c, _regra())
     assert c.divergencia_tabulacao is False and c.divergencia_gravidade is None
 
 
-def test_baixa_confianca_continua_indo_para_revisao_e_sem_gravidade():
-    c = _qualificada("EM_NEGOCIACAO", conf=0.4)
-    pipeline.calcular_divergencia(c, _regra())
-    assert c.divergencia_tabulacao is False and c.precisa_revisao and c.divergencia_gravidade is None
-
-
 # --------------------------------------------------------------------------- pedido de não ligar (LGPD)
 def test_pedido_de_nao_ligar_sem_registro_e_divergencia_alta():
-    c = _qualificada("SEM_INTERESSE", "CLIENTE_REVOLTADO", pediu_nao_ligar=True)
+    c = _avaliada("SEM_INTERESSE", "CLIENTE_REVOLTADO", pediu_nao_ligar=True)
     pipeline.calcular_divergencia(c, _regra(), nao_ligar_ativo=True)
     assert c.divergencia_tabulacao is True and c.divergencia_gravidade == "alta"
     assert "não ligar" in c.divergencia_detalhe
 
 
 def test_pedido_de_nao_ligar_registrado_na_tabulacao_certa_e_coerente():
-    c = _qualificada("SEM_INTERESSE", pediu_nao_ligar=True)
+    c = _avaliada("SEM_INTERESSE", pediu_nao_ligar=True)
     pipeline.calcular_divergencia(c, _regra(categorias=["SEM_INTERESSE", "NAO_E_O_CLIENTE"], nao_ligar=True),
                                   nao_ligar_ativo=True)
     assert c.divergencia_tabulacao is False
@@ -154,19 +148,9 @@ def test_pedido_de_nao_ligar_registrado_na_tabulacao_certa_e_coerente():
 
 def test_sem_tabulacao_de_nao_ligar_no_argus_o_pedido_nao_vira_divergencia():
     """Se o Argus não tem como registrar o pedido, cobrar o operador seria injusto: só lista."""
-    c = _qualificada("SEM_INTERESSE", pediu_nao_ligar=True)
+    c = _avaliada("SEM_INTERESSE", pediu_nao_ligar=True)
     pipeline.calcular_divergencia(c, _regra(), nao_ligar_ativo=False)
     assert c.divergencia_tabulacao is False
-
-
-def test_ia_e_heuristica_detectam_pedido_de_nao_ligar():
-    from openai.lib._parsing import type_to_response_format_param
-
-    props = type_to_response_format_param(ai_qualifier.RespostaIA)["json_schema"]["schema"]["properties"]
-    assert "pedido_nao_ligar" in props
-    assert "pedido_nao_ligar" in ai_qualifier.montar_prompt()
-    assert ai_qualifier.heuristica("não tenho interesse, pare de ligar pra mim", 20).pedido_nao_ligar is True
-    assert ai_qualifier.heuristica("não tenho interesse, obrigado", 20).pedido_nao_ligar is False
 
 
 # --------------------------------------------------------------------------- taxonomia v2
@@ -175,16 +159,16 @@ def test_taxonomia_v2():
     for cat, sub in (("LIGACAO_MUDA", "DESLIGOU_NA_ABERTURA"), ("LIGACAO_MUDA", "LIGACAO_CAIU"),
                      ("SEM_INTERESSE", "JA_E_CLIENTE"), ("INDETERMINADO", "AUDIO_INAUDIVEL")):
         assert valid(cat, sub)
-        assert sub in ai_qualifier.montar_prompt()
 
 
-def test_qualificacao_grava_versao_da_taxonomia_e_pedido(monkeypatch):
+def test_avaliacao_grava_versao_da_taxonomia_e_pedido():
     with SessionLocal() as db:
-        c = Call(id_ligacao=620001, transcricao="não quero, tira meu número da lista", status="pending",
-                 tabulacao_operador="CLIENTE NÃO TEM INTERESSE")
+        c = Call(id_ligacao=620001, status="pendente_avaliacao", tabulacao_operador="CLIENTE NÃO TEM INTERESSE")
         db.add(c)
+        db.flush()
+        avaliacoes.registrar_resultado(db, c, "SEM_INTERESSE", "CLIENTE_REVOLTADO", pediu_nao_ligar=True,
+                                       monitora_nome="Monitora Teste")
         db.commit()
-        pipeline.qualificar_call(db, c)  # sem chave de IA: heurística sobre a transcrição
         assert c.taxonomia_versao == TAXONOMIA_VERSAO and c.pediu_nao_ligar is True
 
 
@@ -192,7 +176,7 @@ def test_qualificacao_grava_versao_da_taxonomia_e_pedido(monkeypatch):
 def _calls(db, tab, *cats, base=630000, **kw):
     out = []
     for i, cat in enumerate(cats):
-        c = Call(id_ligacao=base + i, tabulacao_operador=tab, status="done", categoria=cat, confianca=0.9,
+        c = Call(id_ligacao=base + i, tabulacao_operador=tab, status="avaliada", categoria=cat,
                  data_ligacao=datetime(2025, 5, 1, 9), **kw)
         db.add(c)
         out.append(c)

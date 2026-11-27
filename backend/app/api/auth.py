@@ -36,11 +36,20 @@ def exigir_login(request: Request, db: Session = Depends(get_db)) -> Usuario | N
     return u
 
 
-def exigir_admin(request: Request, db: Session = Depends(get_db)) -> Usuario | None:
-    u = exigir_login(request, db)
-    if settings.auth_ativo and u.papel != "admin":
-        raise HTTPException(403, "Só administradores gerenciam usuários.")
-    return u
+def exigir_papel(*papeis: str, mensagem: str | None = None):
+    """Dependência: exige login com um dos perfis indicados. Com o login desligado, todos são administradores."""
+    nomes = ", ".join(auth.PAPEIS.get(p, p).lower() for p in papeis)
+
+    def _dep(request: Request, db: Session = Depends(get_db)) -> Usuario | None:
+        u = exigir_login(request, db)
+        if settings.auth_ativo and u.papel not in papeis:
+            raise HTTPException(403, mensagem or f"Ação permitida só para: {nomes}.")
+        return u
+
+    return _dep
+
+
+exigir_admin = exigir_papel("admin", mensagem="Só administradores gerenciam usuários.")
 
 
 def nome_do_usuario(request: Request) -> str | None:
@@ -58,11 +67,14 @@ class LoginIn(BaseModel):
     senha: str
 
 
+Papel = Literal["admin", "supervisor", "monitora", "leitura"]
+
+
 class NovoUsuarioIn(BaseModel):
     email: str
     nome: str
     senha: str
-    papel: Literal["admin", "supervisor", "leitura"] = "supervisor"
+    papel: Papel = "supervisor"
 
     @model_validator(mode="after")
     def _validar(self):
@@ -162,7 +174,7 @@ def criar(dados: NovoUsuarioIn, db: Session = Depends(get_db)):
 
 class EditarUsuarioIn(BaseModel):
     nome: str | None = None
-    papel: Literal["admin", "supervisor", "leitura"] | None = None
+    papel: Papel | None = None
     ativo: bool | None = None
     senha: str | None = None
 

@@ -1,10 +1,12 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import worker
 from ..database import get_db
+from ..models import Call
 from ..services import local_ingestor, pipeline, sincronizador, status
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
@@ -44,7 +46,9 @@ async def sync_cruzar(arquivo: UploadFile | None = File(None), db: Session = Dep
 
 @router.post("/argus")
 def sync_argus(data_inicio: date | None = None, data_fim: date | None = None, ultimos_minutos: int | None = None):
-    """Polling/backfill via /report/ligacoesdetalhadas (janelas de até 7 dias por consulta)."""
+    """Polling/backfill via /report/ligacoesdetalhadas (janelas de até 7 dias por consulta).
+
+    As ligações novas entram na fila de download da gravação e depois na fila de avaliação."""
     res = sincronizador.sincronizar(ultimos_minutos, data_inicio, data_fim)
     if not res["ok"]:
         code = 400 if "ARGUS_CAMPAIGN_IDS" in res.get("erro", "") else 502
@@ -53,12 +57,20 @@ def sync_argus(data_inicio: date | None = None, data_fim: date | None = None, ul
 
 
 @router.post("/process")
-def process_pending(limit: int | None = None, include_awaiting: bool = True):
-    return {"enfileiradas": worker.enqueue_pending(limit, include_awaiting)}
+def baixar_pendentes(limit: int | None = 500, db: Session = Depends(get_db)):
+    """Põe na fila de download as ligações sem gravação ainda (pendentes ou com erro no download)."""
+    from ..services import avaliacoes
+
+    ids = db.scalars(select(Call.id).where(Call.status.in_((avaliacoes.PENDENTE, avaliacoes.ERRO)))
+                     .order_by(Call.id.desc()).limit(limit)).all()
+    return {"enfileiradas": sum(worker.enqueue(i) for i in ids)}
 
 
 @router.post("/reprocess/{call_id}")
-def reprocess(call_id: int):
+def reprocess(call_id: int, db: Session = Depends(get_db)):
+    """Baixa a gravação da ligação de novo (ex.: arquivo corrompido ou falha no download). Não desfaz a avaliação."""
+    if not db.get(Call, call_id):
+        raise HTTPException(404, "Ligação não encontrada")
     return {"enfileirada": worker.enqueue(call_id, force=True)}
 
 

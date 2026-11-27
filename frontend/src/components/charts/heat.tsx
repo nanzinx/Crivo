@@ -95,11 +95,11 @@ function Row({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ---------------------------------------------------------------- Matriz: tabulação do operador × categoria IA
+// ---------------------------------------------------------------- Matriz: tabulação do operador × resultado da monitoria
 export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contraste"]; onPick?: (tab: string) => void }) {
-  // "Pendente" (ainda sem análise da IA) não entra na comparação; aparece só no total da linha
+  // "Pendente" (ainda não avaliada pela monitoria) não entra na comparação; aparece só no total da linha
   const cats: string[] = CATEGORIAS.filter((c) => data.some((r) => r.categorias[c]));
-  // Mesma regra do backend (modelo de tabulação). Indeterminado nunca acusa o operador: vai para revisão humana.
+  // Mesma regra do backend (modelo de tabulação). Indeterminado nunca acusa o operador.
   const diverge = (r: Summary["matriz_contraste"][number], cat: string) => {
     if (cat === "PENDENTE" || cat === "INDETERMINADO" || r.tipo === "ignorar") return false;
     if (r.tipo === "nao_tabulado") return ["EM_NEGOCIACAO", "SEM_INTERESSE", "NAO_E_O_CLIENTE"].includes(cat);
@@ -113,7 +113,7 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
           <thead>
             <tr className="text-ink-2">
               <th className="sticky left-0 z-10 bg-surface pb-2 pr-3 text-left align-bottom font-medium">
-                Operador tabulou <span className="text-ink-muted">→ IA ouviu</span>
+                Operador tabulou <span className="text-ink-muted">→ monitoria avaliou</span>
               </th>
               {cats.map((c) => (
                 <th key={c} className="w-[11%] pb-2 text-center align-bottom font-medium" title={catLabel(c)}>
@@ -148,7 +148,7 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
                         key={c}
                         className={cn("num relative h-9 rounded-[4px] text-center transition", div && "ring-2 ring-inset ring-critical")}
                         style={{ background: v ? (c === "PENDENTE" ? "rgb(var(--raised))" : seq(share)) : "transparent", color: inkOn(share) }}
-                        title={`${r.tabulacao_operador} → IA: ${catLabel(c)} = ${v}${qualificadas && c !== "PENDENTE" ? ` (${fmtPct(share * 100)})` : ""}${div ? " · divergente" : ""}`}
+                        title={`${r.tabulacao_operador} → monitoria: ${catLabel(c)} = ${v}${qualificadas && c !== "PENDENTE" ? ` (${fmtPct(share * 100)})` : ""}${div ? " · divergente" : ""}`}
                       >
                         {v ? fmtInt(v) : <span className="text-ink-muted/50">·</span>}
                       </td>
@@ -156,7 +156,7 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
                   })}
                   <td
                     className="num pl-2 text-right font-medium text-ink"
-                    title={r.categorias.PENDENTE ? `${r.categorias.PENDENTE} ainda sem análise da IA` : undefined}
+                    title={r.categorias.PENDENTE ? `${r.categorias.PENDENTE} ainda não avaliadas` : undefined}
                   >
                     {fmtInt(r.total)}
                   </td>
@@ -168,7 +168,7 @@ export function ContrastMatrix({ data, onPick }: { data: Summary["matriz_contras
       </div>
       <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
         <AlertTriangle className="h-3.5 w-3.5 text-critical" />
-        Contorno vermelho = a IA discorda do que o operador tabulou (casos com pouca confiança vão para revisão, não entram aqui). Intensidade = participação na linha.
+        Contorno vermelho = a monitoria discorda do que o operador tabulou (só ligações já avaliadas entram aqui). Intensidade = participação na linha.
       </p>
       {data.some((r) => !r.confirmada) && (
         <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">

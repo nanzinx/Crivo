@@ -9,7 +9,7 @@ from .. import worker
 from ..config import settings
 from ..database import get_db
 from ..models import Call, Tabulacao, agora
-from ..services import argus_client, custos, pipeline, qualidade, status
+from ..services import argus_client, avaliacoes, pipeline, status
 
 router = APIRouter(prefix="/api/v1", tags=["saude"])
 
@@ -18,7 +18,6 @@ NOMES = {
     status.POLLING: "Polling Argus",
     status.SYNC_MANUAL: "Sincronização manual",
     status.DOWNLOAD: "Download de gravações",
-    status.IA: "Qualificação por IA",
     status.IMPORTACAO: "Importação local",
     status.CRUZAMENTO: "Cruzamento com a discadora",
 }
@@ -32,13 +31,12 @@ def _em_horario_comercial(now: datetime) -> bool:
     return now.weekday() < 6 and ini <= now.hour < fim
 
 
-def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: dict | None = None,
-             pendentes_tab: int = 0) -> list[dict]:
+def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, pendentes_tab: int = 0) -> list[dict]:
     out: list[dict] = []
     add = lambda nivel, titulo, msg: out.append({"nivel": nivel, "titulo": titulo, "mensagem": msg})  # noqa: E731
     argus_on = bool(settings.argus_token)
 
-    for chave in (status.POLLING, status.SYNC_MANUAL, status.DOWNLOAD, status.IA, status.CRUZAMENTO):
+    for chave in (status.POLLING, status.SYNC_MANUAL, status.DOWNLOAD, status.CRUZAMENTO):
         ev = eventos.get(chave)
         if ev and not ev["ok"]:
             add("critico", f"{NOMES[chave]} falhando", ev["detalhe"] or "Última execução falhou.")
@@ -56,28 +54,14 @@ def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, custo: d
         if not argus_client.campaign_ids():
             add("atencao", "Polling desligado", "Defina ARGUS_CAMPAIGN_IDS para ativar o polling de segurança.")
 
-    aguardando = por_status.get("awaiting_ai", 0)
-    if aguardando and not settings.openai_api_key:
-        add("atencao", "IA não configurada", f"{aguardando} ligações aguardando OPENAI_API_KEY.")
-    if erros := por_status.get("error", 0):
-        add("atencao", "Ligações com erro", f"{erros} ligações falharam e podem ser reprocessadas.")
-    if custo:
-        pct = custo.get("teto_pct")
-        if pct is not None and pct >= 100:
-            add("critico", "Teto diário de IA atingido",
-                f"Gasto de hoje: US$ {custo['hoje_usd']:.2f} (teto US$ {custo['teto_diario_usd']:.2f}). "
-                "Novas ligações aguardam até amanhã.")
-        elif pct is not None and pct >= 80:
-            add("atencao", "Perto do teto diário de IA", f"{pct:.0f}% do teto de US$ {custo['teto_diario_usd']:.2f} usado hoje.")
-        if custo.get("modelos_sem_preco"):
-            add("atencao", "Modelo sem preço cadastrado",
-                f"Custo de {', '.join(custo['modelos_sem_preco'])} não está sendo contado. Defina os preços no .env.")
+    if erros := por_status.get(avaliacoes.ERRO, 0):
+        add("atencao", "Gravações com erro", f"{erros} ligações sem gravação: o download falhou e pode ser refeito.")
     if pendentes_tab:
         add("atencao", "Tabulações sem revisão",
             f"{pendentes_tab} tabulação(ões) do Argus com significado apenas sugerido. "
             "Confirme em Modelo de tabulação para a divergência ser confiável.")
     if fila > settings.alerta_fila_max:
-        add("atencao", "Fila acumulada", f"{fila} ligações aguardando processamento.")
+        add("atencao", "Fila acumulada", f"{fila} gravações aguardando download.")
     return out
 
 
@@ -90,25 +74,22 @@ def saude(db: Session = Depends(get_db)):
     por_status = dict(db.execute(select(Call.status, func.count()).group_by(Call.status)).all())
     fila = worker.queue_size()
 
-    custo = custos.resumo(db)
     pipeline.vincular_pendentes(db)
     pendentes_tab = db.scalar(
         select(func.count(func.distinct(Tabulacao.id))).join(Call, Call.tabulacao_id == Tabulacao.id)
         .where(Tabulacao.confirmada.is_(False))) or 0
-    erros = db.scalars(select(Call).where(Call.status == "error").order_by(Call.id.desc()).limit(15)).all()
+    erros = db.scalars(select(Call).where(Call.status == avaliacoes.ERRO).order_by(Call.id.desc()).limit(15)).all()
     ultimas_24h = db.scalar(select(func.count(Call.id)).where(Call.criado_em >= now - timedelta(hours=24))) or 0
     ultima = db.scalar(select(func.max(Call.data_ligacao)))
 
     return {
         "gerado_em": now.isoformat(),
         "integracoes": {
-            "ia": {"configurada": bool(settings.openai_api_key), "modelo": settings.openai_model,
-                   "transcricao": settings.openai_whisper_model},
             "argus": {"configurado": bool(settings.argus_token), "campanhas": argus_client.campaign_ids(),
                       "polling_minutos": settings.argus_poll_minutos},
         },
         "fila": {"tamanho": fila},
-        "status_ligacoes": {k: por_status.get(k, 0) for k in ("pending", "awaiting_ai", "done", "error")},
+        "status_ligacoes": {k: por_status.get(k, 0) for k in avaliacoes.STATUS},
         "recebidas_24h": ultimas_24h,
         "ultima_ligacao_em": ultima.isoformat() if ultima else None,
         "eventos": eventos,
@@ -117,8 +98,7 @@ def saude(db: Session = Depends(get_db)):
              "erro": c.erro, "operador_nome": c.operador_nome}
             for c in erros
         ],
-        "custos": custo,
-        "revisao_pendente": db.scalar(select(func.count(Call.id)).where(Call.status == "done", qualidade.cond_fila())) or 0,
+        "aguardando_avaliacao": por_status.get(avaliacoes.PENDENTE_AVALIACAO, 0),
         "tabulacoes_pendentes": pendentes_tab,
-        "alertas": _alertas(eventos, por_status, fila, now, custo, pendentes_tab),
+        "alertas": _alertas(eventos, por_status, fila, now, pendentes_tab),
     }

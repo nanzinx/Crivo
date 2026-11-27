@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertOctagon,
   AlertTriangle,
-  Bot,
   CheckCircle2,
   CloudDownload,
   FileSpreadsheet,
@@ -23,8 +22,8 @@ import { toast } from "sonner";
 import { CallDrawer } from "@/components/calls/call-drawer";
 import { Button, Card, Empty, Pill, Skeleton } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/stat-tile";
-import { api, type Custos, type Evento, type Saude } from "@/lib/api";
-import { STATUS_LABEL, cn, fmtAgo, fmtDateTime, fmtDay, fmtInt, fmtUsd, isoDate } from "@/lib/utils";
+import { api, type Evento, type Saude } from "@/lib/api";
+import { cn, fmtAgo, fmtDateTime, fmtInt, isoDate } from "@/lib/utils";
 
 export default function SaudePage() {
   const qc = useQueryClient();
@@ -60,9 +59,9 @@ export default function SaudePage() {
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             <Contador label="Na fila agora" value={data.fila.tamanho} icon={<Loader2 className={cn("h-4 w-4", data.fila.tamanho > 0 && "animate-spin")} />} />
             <Contador label="Recebidas em 24h" value={data.recebidas_24h} icon={<Inbox className="h-4 w-4" />} />
-            <Contador label={STATUS_LABEL.pending} value={data.status_ligacoes.pending + data.status_ligacoes.awaiting_ai} icon={<PlayCircle className="h-4 w-4" />} />
-            <Contador label="Com erro" value={data.status_ligacoes.error} icon={<XCircle className="h-4 w-4" />} tone={data.status_ligacoes.error ? "critical" : undefined} />
-            <Contador label="Qualificadas" value={data.status_ligacoes.done} icon={<CheckCircle2 className="h-4 w-4" />} tone="good" />
+            <Contador label="Aguardando avaliação" value={data.aguardando_avaliacao} icon={<PlayCircle className="h-4 w-4" />} />
+            <Contador label="Erro no download" value={data.status_ligacoes.erro} icon={<XCircle className="h-4 w-4" />} tone={data.status_ligacoes.erro ? "critical" : undefined} />
+            <Contador label="Avaliadas" value={data.status_ligacoes.avaliada} icon={<CheckCircle2 className="h-4 w-4" />} tone="good" />
           </section>
 
           <div className="grid gap-4 lg:grid-cols-5">
@@ -70,11 +69,9 @@ export default function SaudePage() {
               <Integracoes data={data} />
             </Card>
             <Card title="Ações" subtitle="Alimentar e processar a base" className="lg:col-span-2">
-              <Acoes onDone={refresh} pendentes={data.status_ligacoes.pending + data.status_ligacoes.error + data.status_ligacoes.awaiting_ai} />
+              <Acoes onDone={refresh} pendentes={data.status_ligacoes.pendente + data.status_ligacoes.erro} />
             </Card>
           </div>
-
-          <CustoIA c={data.custos} />
 
           <Card title="Erros recentes" subtitle="Ligações que falharam — reprocesse após corrigir a causa">
             {data.erros_recentes.length === 0 ? (
@@ -96,112 +93,6 @@ export default function SaudePage() {
         </>
       )}
       <CallDrawer id={open} onClose={() => setOpen(null)} />
-    </div>
-  );
-}
-
-function CustoIA({ c }: { c: Custos }) {
-  const [hover, setHover] = useState<number | null>(null);
-  // Escala pelos gastos reais; a linha do teto só aparece quando cabe no gráfico (a barra ao lado já mostra o teto)
-  const pico = Math.max(...c.serie.map((d) => d.usd), 0.0001);
-  const tetoNoGrafico = c.teto_diario_usd > 0 && c.teto_diario_usd <= pico * 1.6;
-  const max = tetoNoGrafico ? Math.max(pico, c.teto_diario_usd) * 1.08 : pico * 1.08;
-  const totalMes = c.ligacoes_com_ia_mes + c.resolvidas_sem_ia_mes;
-  const pctSemIa = totalMes ? (100 * c.resolvidas_sem_ia_mes) / totalMes : 0;
-  const sel = hover != null ? c.serie[hover] : null;
-  const tetoTone = c.teto_pct == null ? "" : c.teto_pct >= 100 ? "bg-critical" : c.teto_pct >= 80 ? "bg-warn" : "bg-good";
-
-  return (
-    <Card
-      title="Custo de IA"
-      subtitle={`Estimado pelo preço de tabela · ${c.modelo_transcricao} + ${c.modelo_classificacao}${c.diarizacao ? " · com separação por falante" : ""}`}
-    >
-      <div className="grid gap-5 lg:grid-cols-5">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 lg:col-span-2">
-          <Num label="Hoje" valor={fmtUsd(c.hoje_usd)} />
-          <Num label="Neste mês" valor={fmtUsd(c.mes_usd)} />
-          <Num label="Média por ligação com IA" valor={fmtUsd(c.custo_medio_usd)} sub={`${fmtInt(c.minutos_transcritos_mes)} min transcritos no mês`} />
-          <Num label="Ligações analisadas por IA no mês" valor={fmtInt(c.ligacoes_com_ia_mes)} />
-          <Num
-            label="Poupado pelo corte de silêncio"
-            valor={c.corte_silencio || c.minutos_economizados_mes ? `${fmtInt(c.minutos_economizados_mes)} min` : "desligado"}
-            sub={
-              c.corte_silencio || c.minutos_economizados_mes
-                ? `${c.economia_corte_pct.toLocaleString("pt-BR")}% a menos de áudio enviado no mês`
-                : "ative CORTAR_SILENCIO no .env"
-            }
-          />
-          <Num
-            label="Resolvidas sem IA no mês"
-            valor={fmtInt(c.resolvidas_sem_ia_mes)}
-            sub={totalMes ? `${pctSemIa.toFixed(0)}% das analisadas (sem fala no áudio)` : "mudas detectadas localmente"}
-          />
-          <div className="col-span-2">
-            {c.teto_diario_usd > 0 ? (
-              <>
-                <div className="mb-1 flex justify-between text-xs text-ink-2">
-                  <span>Teto diário</span>
-                  <span className="num">
-                    {fmtUsd(c.hoje_usd)} de {fmtUsd(c.teto_diario_usd)} ({(c.teto_pct ?? 0).toFixed(0)}%)
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-raised">
-                  <motion.div className={cn("h-full rounded-full", tetoTone)} initial={{ width: 0 }} animate={{ width: `${Math.min(100, c.teto_pct ?? 0)}%` }} />
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-ink-muted">
-                Sem teto diário. Defina <code className="font-mono">IA_TETO_DIARIO_USD</code> no .env para limitar o gasto.
-              </p>
-            )}
-          </div>
-        </dl>
-
-        <div className="lg:col-span-3">
-          <div className="mb-2 flex items-baseline justify-between text-xs">
-            <span className="font-medium text-ink-2">Gasto por dia (14 dias)</span>
-            <span className="num text-ink-muted">{sel ? `${fmtDay(sel.data)}: ${fmtUsd(sel.usd)}` : "toque ou passe o mouse numa barra"}</span>
-          </div>
-          <div className="relative mt-4 flex h-32 items-end gap-[2px] border-b border-line" role="img" aria-label="Gasto diário com IA nos últimos 14 dias">
-            {tetoNoGrafico && (
-              <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-critical/60" style={{ bottom: `${(c.teto_diario_usd / max) * 100}%` }}>
-                <span className="absolute -top-3.5 left-0 bg-surface pr-1 text-[10px] text-critical">teto diário</span>
-              </div>
-            )}
-            {c.serie.map((d, i) => (
-              <div
-                key={d.data}
-                className="group flex h-full flex-1 items-end justify-center"
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-                title={`${fmtDay(d.data)}: ${fmtUsd(d.usd)}`}
-              >
-                <motion.div
-                  className={cn("w-full max-w-[24px] rounded-t-[4px] transition-opacity", hover != null && hover !== i && "opacity-40")}
-                  style={{ background: "var(--seq)" }}
-                  initial={{ height: 0 }}
-                  animate={{ height: `${Math.max(d.usd > 0 ? 2 : 0, (d.usd / max) * 100)}%` }}
-                  transition={{ duration: 0.5, delay: i * 0.02 }}
-                />
-              </div>
-            ))}
-          </div>
-          <div className="num mt-1 flex justify-between text-[10px] text-ink-muted">
-            <span>{fmtDay(c.serie[0].data)}</span>
-            <span>{fmtDay(c.serie[c.serie.length - 1].data)}</span>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function Num({ label, valor, sub }: { label: string; valor: string; sub?: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="truncate text-xs text-ink-muted">{label}</dt>
-      <dd className="num text-xl font-semibold tracking-tight">{valor}</dd>
-      {sub && <dd className="truncate text-[11px] text-ink-muted">{sub}</dd>}
     </div>
   );
 }
@@ -273,7 +164,7 @@ function Contador({ label, value, icon, tone }: { label: string; value: number; 
   );
 }
 
-const ORDEM = ["argus_webhook", "argus_polling", "argus_sync", "argus_download", "ia", "importacao_local", "cruzamento"];
+const ORDEM = ["argus_webhook", "argus_polling", "argus_sync", "argus_download", "importacao_local", "cruzamento"];
 
 function Integracoes({ data }: { data: Saude }) {
   const ev = data.eventos;
@@ -281,12 +172,6 @@ function Integracoes({ data }: { data: Saude }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-2 sm:grid-cols-2">
-        <Config
-          icon={<Bot className="h-4 w-4" />}
-          title="IA (OpenAI)"
-          ok={data.integracoes.ia.configurada}
-          detail={data.integracoes.ia.configurada ? `${data.integracoes.ia.modelo} + ${data.integracoes.ia.transcricao}` : "OPENAI_API_KEY ausente"}
-        />
         <Config
           icon={<PlugZap className="h-4 w-4" />}
           title="Argus"
@@ -301,7 +186,7 @@ function Integracoes({ data }: { data: Saude }) {
         />
       </div>
       {chaves.length === 0 ? (
-        <Empty title="Nenhum evento registrado ainda">Os eventos aparecem quando chegam webhooks, rodam importações ou a IA processa ligações.</Empty>
+        <Empty title="Nenhum evento registrado ainda">Os eventos aparecem quando chegam webhooks, rodam importações ou gravações são baixadas.</Empty>
       ) : (
         <ol className="relative space-y-1 before:absolute before:bottom-3 before:left-[15px] before:top-3 before:w-px before:bg-line">
           {chaves.map((k) => (
@@ -372,7 +257,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
     const p = (r as { pasta?: { novas?: number; vinculadas?: number }; cruzamento?: { linhas_enriquecidas?: number } });
     return `Importação concluída: ${p.pasta?.novas ?? 0} novas, ${p.pasta?.vinculadas ?? 0} vinculadas, ${p.cruzamento?.linhas_enriquecidas ?? 0} cruzadas`;
   });
-  const processar = useAcao(api.processarPendentes, onDone, (r) => `${r.enfileiradas} ligações enviadas para a IA`);
+  const processar = useAcao(api.processarPendentes, onDone, (r) => `${r.enfileiradas} gravações na fila de download`);
   const recentes = useAcao(() => api.sincronizarArgus({ ultimos_minutos: 15 }), onDone, (r) => `${r.ligacoes} ligações recebidas do Argus`);
   const backfill = useAcao(() => api.sincronizarArgus({ data_inicio: ini, data_fim: fim }), onDone, (r) => `${r.ligacoes} ligações recebidas do Argus`);
   const cruzar = useMutation({
@@ -423,7 +308,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
 
       <div className="flex min-w-0 flex-col gap-2">
         <Acao icon={<FolderInput className="h-4 w-4" />} title="Importar acervo local" desc="Pasta de gravações + relatórios configurados no .env" onClick={() => importar.mutate()} loading={importar.isPending} />
-        <Acao icon={<Upload className="h-4 w-4" />} title="Processar pendentes" desc={`${fmtInt(pendentes)} ligações pendentes ou com erro`} onClick={() => processar.mutate()} loading={processar.isPending} />
+        <Acao icon={<Upload className="h-4 w-4" />} title="Baixar gravações pendentes" desc={`${fmtInt(pendentes)} ligações sem gravação ou com erro no download`} onClick={() => processar.mutate()} loading={processar.isPending} />
         <Acao icon={<CloudDownload className="h-4 w-4" />} title="Buscar no Argus (15 min)" desc="Puxa as ligações mais recentes agora" onClick={() => recentes.mutate()} loading={recentes.isPending} />
       </div>
 

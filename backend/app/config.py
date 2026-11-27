@@ -16,39 +16,8 @@ class Settings(BaseSettings):
     argus_campaign_ids: str = ""  # ex.: "12,15" (usado no polling/backfill)
     argus_audio_format: str = "MP3"
     argus_audio_channels: int = 1  # 1 mono | 2 estéreo | 3 estéreo separando pontas A/B
-    argus_canal_operador: int = 0  # no estéreo separado: 0 = operador no canal esquerdo (ponta A), 1 = direito
     argus_webhook_secret: str = ""
     argus_poll_minutos: int = 5  # intervalo do polling de fallback
-
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    # Transcrição: gpt-4o-mini-transcribe custa cerca de metade do whisper-1 (valide com scripts/comparar_transcricao)
-    openai_whisper_model: str = "gpt-4o-mini-transcribe"
-
-    # ----- Custo de IA -----
-    ia_diarizar: bool = False  # True = a IA reescreve a conversa separada por falante (resposta ~5x maior)
-    ia_teto_diario_usd: float = 0  # 0 = sem teto; ao atingir, as ligações ficam "aguardando IA" até o dia seguinte
-    # Preços (US$). 0 = usar a tabela de app/services/custos.py para o modelo configurado
-    preco_transcricao_minuto: float = 0
-    preco_entrada_1m: float = 0
-    preco_saida_1m: float = 0
-
-    # ----- Tratamento do áudio antes de transcrever (sem IA) -----
-    cortar_silencio: bool = True  # remove espera/silêncio longos: a transcrição é cobrada por duração
-    transcricao_por_canal: bool = True  # estéreo separado: transcreve operador e cliente em separado
-
-    # ----- Detecção local de fala (sem IA) -----
-    vad_ativo: bool = True
-    vad_fala_minima_segundos: float = 0.6  # menos fala que isso = "Mudo total" sem chamar a IA
-    suspeita_fala_canal_segundos: float = 3  # estéreo: fala em CADA lado para suspeitar de conversa
-    suspeita_fala_mono_segundos: float = 20  # mono: fala total para suspeitar de conversa
-
-    # Divergência só é apontada com confiança da IA a partir daqui; abaixo, vai para revisão humana
-    confianca_minima_divergencia: float = 0.6
-
-    # Porcentagem das ligações analisadas que vai, por sorteio, para a fila de revisão humana.
-    # Mede a IA sem viés: se só os casos duvidosos fossem revisados, a acurácia pareceria pior do que é.
-    amostra_qualidade_pct: float = 2
 
     # ----- Alertas automáticos (avaliados a cada ALERTA_INTERVALO_MINUTOS) -----
     alerta_intervalo_minutos: int = 15

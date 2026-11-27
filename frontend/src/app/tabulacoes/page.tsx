@@ -209,8 +209,8 @@ export default function TabulacoesPage() {
 }
 
 const TIPO_AJUDA: Record<TipoTabulacao, string> = {
-  resultado: "A tabulação afirma o que aconteceu. Marque as categorias da IA que concordam com ela.",
-  nao_tabulado: "O operador não registrou resultado (ex.: tempo pós-atendimento). Diverge se a IA ouviu uma conversa.",
+  resultado: "A tabulação afirma o que aconteceu. Marque os resultados da monitoria que concordam com ela.",
+  nao_tabulado: "O operador não registrou resultado (ex.: tempo pós-atendimento). Diverge se a monitoria ouviu uma conversa.",
   ignorar: "Não serve para comparar (tabulação de sistema, pausa…). Nunca gera divergência.",
 };
 
@@ -327,7 +327,7 @@ function Editor({ t, opcoes }: { t: Tabulacao; opcoes: TabulacoesResp["opcoes"] 
         <div className={cn("flex flex-col gap-4 transition", r.tipo !== "resultado" && "pointer-events-none opacity-40")} aria-disabled={r.tipo !== "resultado"}>
           <div>
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-              Categorias da IA que confirmam esta tabulação
+              Resultados da monitoria que confirmam esta tabulação
             </div>
             <div className="flex flex-wrap gap-2">
               {CATEGORIAS.filter((c) => c !== "INDETERMINADO").map((c) => {

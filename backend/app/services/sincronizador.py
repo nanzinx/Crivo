@@ -21,7 +21,7 @@ def _janelas(data_inicio: date | None, data_fim: date | None) -> list[tuple[date
 
 def sincronizar(ultimos_minutos: int | None = None, data_inicio: date | None = None,
                 data_fim: date | None = None, chave: str = status.SYNC_MANUAL) -> dict:
-    """Busca /report/ligacoesdetalhadas de todas as campanhas, faz upsert e enfileira para qualificação."""
+    """Busca /report/ligacoesdetalhadas de todas as campanhas, faz upsert e enfileira o download da gravação."""
     from .. import worker
     from ..api.webhooks import upsert_from_argus
 

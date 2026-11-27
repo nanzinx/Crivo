@@ -5,14 +5,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowRight,
-  Bot,
   ChevronDown,
+  ClipboardCheck,
   Copy,
   Ear,
-  Headphones,
   Pause,
   Play,
-  Quote,
   RefreshCw,
   UserCheck,
   UserRound,
@@ -22,10 +20,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { usePlayer } from "@/components/player/player-context";
-import { RevisaoPanel } from "./revisao-panel";
-import { Button, CategoryBadge, GravidadePill, Meter, NaoLigarPill, Pill, Skeleton } from "@/components/ui/primitives";
+import { ResultadoPanel } from "./resultado-panel";
+import { Button, CategoryBadge, GravidadePill, NaoLigarPill, Pill, Skeleton } from "@/components/ui/primitives";
 import { api, type Call } from "@/lib/api";
-import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone, fmtUsd } from "@/lib/utils";
+import { DESLIG_LABEL, STATUS_LABEL, catLabel, cn, fmtDateTime, fmtDur, fmtPhone } from "@/lib/utils";
+import { useAuth } from "@/components/auth-context";
 
 export function PlayButton({ call, queue, size = "md" }: { call: Call; queue?: Call[]; size?: "sm" | "md" }) {
   const p = usePlayer();
@@ -93,14 +92,14 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
   const qc = useQueryClient();
   const { data: c, isLoading } = useQuery({ queryKey: ["call", id], queryFn: () => api.call(id) });
   const [showRaw, setShowRaw] = useState(false);
-  const porCanal = Boolean(c?.metricas_acusticas?.transcricao_por_canal);
-  const reprocess = useMutation({
-    mutationFn: () => api.reprocessar(id),
+  const { podeEditar } = useAuth();
+  const baixar = useMutation({
+    mutationFn: () => api.baixarAudioDeNovo(id),
     onSuccess: (r) => {
-      toast.success(r.enfileirada ? "Ligação enviada para nova análise" : "Ligação já está na fila");
+      toast.success(r.enfileirada ? "Gravação na fila para baixar de novo" : "A gravação já está na fila");
       setTimeout(() => qc.invalidateQueries({ queryKey: ["call", id] }), 2500);
     },
-    onError: (e) => toast.error(`Falha ao reprocessar: ${(e as Error).message}`),
+    onError: (e) => toast.error(`Falha ao pedir o download: ${(e as Error).message}`),
   });
 
   return (
@@ -114,7 +113,7 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
             <>
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-lg font-semibold tracking-tight">{c.cliente_identificado || c.nome_esperado || "Cliente não identificado"}</h2>
-                {c.status !== "done" && <Pill tone={c.status === "error" ? "critical" : "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Pill>}
+                {c.status !== "avaliada" && <Pill tone={c.status === "erro" ? "critical" : c.status === "nao_avaliavel" ? "warn" : "neutral"}>{STATUS_LABEL[c.status] ?? c.status}</Pill>}
               </div>
               <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-ink-muted">
                 <span>{fmtDateTime(c.data_ligacao)}</span>·<span>{fmtPhone(c.telefone)}</span>·<span>{fmtDur(c.duracao_segundos)}</span>
@@ -151,7 +150,7 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
           </div>
         ) : (
           <>
-            {/* Contraste Argus × IA */}
+            {/* Contraste: o que o operador tabulou × o que a monitora avaliou */}
             <section className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
               <div className="rounded-2xl border border-line p-3">
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
@@ -172,9 +171,13 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </div>
               <div className={cn("rounded-2xl border p-3", c.divergencia_tabulacao ? "border-critical/40 bg-critical/[.04]" : "border-line")}>
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-                  {c.revisado ? <UserCheck className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />} {c.revisado ? "Revisão humana" : "IA ouviu"}
+                  {c.avaliado_por ? <UserCheck className="h-3.5 w-3.5" /> : <ClipboardCheck className="h-3.5 w-3.5" />} Monitoria
                 </div>
-                <CategoryBadge code={c.categoria} className="text-sm" />
+                {c.categoria ? (
+                  <CategoryBadge code={c.categoria} className="text-sm" />
+                ) : (
+                  <div className="text-sm text-ink-muted">{c.status === "nao_avaliavel" ? "Não avaliável" : "Aguardando avaliação"}</div>
+                )}
                 {c.subcategoria_label && c.subcategoria_label !== "-" && (
                   <div className="mt-1 truncate text-xs text-ink-muted">{c.subcategoria_label}</div>
                 )}
@@ -207,17 +210,17 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
               </p>
             )}
 
-            {c.motivo_fila && (
+            {c.status === "pendente_avaliacao" && (
               <p className="-mt-2 flex items-start gap-2 rounded-xl bg-warn/15 p-3 text-xs text-ink">
                 <Ear className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  <b className="font-semibold">Na fila de revisão humana:</b> {c.motivo_fila}
-                  {c.precisa_revisao && " Enquanto ninguém ouvir, esta ligação não conta como divergência do operador."}
+                  <b className="font-semibold">Aguardando avaliação da monitoria.</b> Enquanto ninguém ouvir, esta ligação não conta como
+                  divergência do operador.
                 </span>
               </p>
             )}
 
-            <RevisaoPanel c={c} />
+            <ResultadoPanel c={c} />
 
             {c.erro && (
               <p className="flex items-start gap-2 rounded-xl bg-critical/[.06] p-3 text-xs">
@@ -225,72 +228,6 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
                 <span className="break-words">{c.erro}</span>
               </p>
             )}
-
-            {(c.resumo || c.confianca != null) && (
-              <section className="space-y-3">
-                {c.resumo && <p className="text-sm leading-relaxed text-ink-2">{c.resumo}</p>}
-                <div className="grid grid-cols-[auto_1fr] items-center gap-3 text-xs text-ink-muted">
-                  Confiança da IA <Meter value={c.confianca} />
-                </div>
-              </section>
-            )}
-
-            {c.evidencia && (
-              <blockquote className="relative rounded-2xl bg-raised p-4 pl-10 text-sm italic text-ink">
-                <Quote className="absolute left-3 top-4 h-4 w-4 text-ink-muted" />
-                {c.evidencia}
-              </blockquote>
-            )}
-
-            {/* Transcrição */}
-            <section>
-              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                <Headphones className="h-4 w-4 text-ink-muted" /> Transcrição
-              </h3>
-              {porCanal && (
-                <p className="mb-3 rounded-xl bg-raised px-3 py-2 text-xs text-ink-2">
-                  Áudio estéreo: cada balão reúne <b className="font-semibold">todas as falas daquele lado</b> da linha, medidas pelo
-                  canal de áudio. Não é a ordem da conversa. Se operador e cliente estiverem trocados, ajuste{" "}
-                  <code className="font-mono">ARGUS_CANAL_OPERADOR</code>.
-                </p>
-              )}
-              {c.transcricao_diarizada?.length ? (
-                <ol className="space-y-2">
-                  {c.transcricao_diarizada.map((t, i) => {
-                    const op = t.speaker === "ATENDENTE";
-                    const ura = t.speaker === "URA";
-                    return (
-                      <motion.li
-                        key={i}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: Math.min(i * 0.04, 0.4) }}
-                        className={cn("flex", op ? "justify-start" : "justify-end")}
-                      >
-                        <div
-                          className={cn(
-                            "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm",
-                            op && "rounded-bl-md bg-raised text-ink",
-                            !op && !ura && "rounded-br-md bg-brand-soft text-ink",
-                            ura && "rounded-br-md border border-dashed border-line text-ink-2",
-                          )}
-                        >
-                          <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                            {op ? "Operador" : ura ? "Gravação / URA" : "Cliente"}
-                            {t.sentiment === "revoltado" && <Pill tone="critical">revoltado</Pill>}
-                          </div>
-                          {t.text}
-                        </div>
-                      </motion.li>
-                    );
-                  })}
-                </ol>
-              ) : c.transcricao ? (
-                <p className="whitespace-pre-wrap rounded-2xl bg-raised p-4 text-sm leading-relaxed text-ink-2">{c.transcricao}</p>
-              ) : (
-                <p className="text-sm text-ink-muted">Sem transcrição.</p>
-              )}
-            </section>
 
             {/* Metadados */}
             <section>
@@ -321,10 +258,6 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
                       ["Campanha", c.id_campanha],
                       ["Lead", c.nr_lead],
                       ["Tabulação normalizada", c.tabulacao_normalizada ? catLabel(c.tabulacao_normalizada) : null],
-                      ["Analisada por", c.motor === "local" ? "Análise local (sem IA)" : c.motor === "openai" ? "IA" : c.motor],
-                      ["Alucinações removidas", (c.metricas_acusticas?.alucinacoes_removidas as number | undefined) ?? null],
-                      ["Fala detectada", c.fala_segundos != null ? `${c.fala_segundos.toLocaleString("pt-BR")}s` : null],
-                      ["Custo de IA", c.custo_usd ? fmtUsd(c.custo_usd) : c.motor === "local" ? "US$ 0 (sem IA)" : null],
                       ["Origem", c.origem],
                     ].map(([k, v]) => (
                       <div key={k as string} className="min-w-0">
@@ -351,9 +284,11 @@ function Detail({ id, onClose, queue }: { id: number; onClose: () => void; queue
 
       <footer className="flex items-center justify-between gap-2 border-t border-line p-3 sm:p-4">
         <span className="text-[11px] text-ink-muted">Esc fecha · espaço toca/pausa</span>
-        <Button variant="soft" size="sm" onClick={() => reprocess.mutate()} loading={reprocess.isPending}>
-          <RefreshCw className="h-3.5 w-3.5" /> Reanalisar com IA
-        </Button>
+        {podeEditar && (
+          <Button variant="soft" size="sm" onClick={() => baixar.mutate()} loading={baixar.isPending} title="Baixa a gravação do Argus de novo (não desfaz a avaliação)">
+            <RefreshCw className="h-3.5 w-3.5" /> Baixar áudio de novo
+          </Button>
+        )}
       </footer>
     </>
   );

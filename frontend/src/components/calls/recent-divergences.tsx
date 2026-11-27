@@ -13,7 +13,7 @@ import { CallDrawer, PlayButton } from "./call-drawer";
 
 type Aba = "divergencia" | "revisao" | "nao_ligar";
 
-/** Fila de trabalho do supervisor: divergências confirmadas pela IA e casos que precisam de um ouvido humano. */
+/** Fila de trabalho do supervisor: divergências apontadas pela monitoria e ligações aguardando avaliação. */
 export function RecentDivergences() {
   const { filters, query } = useFilters();
   const [aba, setAba] = useState<Aba>("divergencia");
@@ -29,12 +29,12 @@ export function RecentDivergences() {
 
   return (
     <Card
-      title="Para revisar agora"
+      title="Para olhar agora"
       subtitle={
         aba === "divergencia"
-          ? "A IA tem segurança de que a tabulação não bate com a gravação · mais graves primeiro"
+          ? "A avaliação da monitoria não bate com a tabulação do operador · mais graves primeiro"
           : aba === "revisao"
-            ? "A IA não teve segurança, ou o áudio contradiz a tabulação: ouça antes de concluir"
+            ? "Gravações prontas, esperando a monitoria ouvir"
             : "Quem atendeu pediu para não receber mais ligações (LGPD): confira se o número saiu do mailing"
       }
       action={
@@ -47,7 +47,7 @@ export function RecentDivergences() {
         {(
           [
             ["divergencia", "Divergências", AlertTriangle],
-            ["revisao", "Revisão humana", Ear],
+            ["revisao", "Aguardando avaliação", Ear],
             ["nao_ligar", "Não ligar", PhoneOff],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -75,7 +75,7 @@ export function RecentDivergences() {
       ) : data.items.length === 0 ? (
         <Empty
           title={
-            aba === "divergencia" ? "Nenhuma divergência no período 🎉" : aba === "revisao" ? "Nada aguardando revisão humana" : "Nenhum pedido de não ligar no período"
+            aba === "divergencia" ? "Nenhuma divergência no período 🎉" : aba === "revisao" ? "Nada aguardando avaliação" : "Nenhum pedido de não ligar no período"
           }
         />
       ) : (
@@ -110,9 +110,7 @@ export function RecentDivergences() {
                       {c.pediu_nao_ligar && aba === "divergencia" && <NaoLigarPill className="shrink-0" />}
                     </div>
                   ) : (
-                    <div className="mt-1 truncate text-xs text-ink-2" title={c.motivo_fila ?? ""}>
-                      {c.motivo_fila}
-                    </div>
+                    <div className="mt-1 truncate text-xs text-ink-2">Operador tabulou: {c.tabulacao_operador || "—"}</div>
                   )}
                 </div>
               </div>

@@ -11,7 +11,8 @@ import { cn, fmtAgo } from "@/lib/utils";
 
 const PAPEIS: Record<string, { label: string; desc: string }> = {
   admin: { label: "Administrador", desc: "Tudo, inclusive gerenciar usuários" },
-  supervisor: { label: "Supervisor", desc: "Consulta, revisa, confirma tabulações, importa" },
+  monitora: { label: "Monitora de qualidade", desc: "Ouve as ligações e registra o resultado da avaliação" },
+  supervisor: { label: "Supervisor", desc: "Consulta, confirma tabulações, importa, cuida dos alertas" },
   leitura: { label: "Só leitura", desc: "Só consulta" },
 };
 

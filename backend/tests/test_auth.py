@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.database import SessionLocal
 from app.main import app
-from app.models import Call, Sessao, Usuario
+from app.models import Avaliacao, Call, Sessao, Usuario
 from app.services import auth
 
 
@@ -17,6 +17,7 @@ def com_login(monkeypatch):
     monkeypatch.setattr(settings, "auth_ativo", True)
     with SessionLocal() as db:
         db.query(Sessao).delete()
+        db.query(Avaliacao).update({Avaliacao.monitora_id: None})  # a avaliação guarda o nome; o vínculo pode sair
         db.query(Usuario).delete()
         db.commit()
     with TestClient(app) as c:
@@ -100,22 +101,32 @@ def test_perfil_leitura_so_consulta(com_login):
     _criar("leo@empresa.com", "leitura")
     _login(com_login, "leo@empresa.com")
     assert com_login.get("/api/v1/calls").status_code == 200
-    r = com_login.post("/api/v1/sync/process")
+    r = com_login.post("/api/v1/alertas/avaliar")
     assert r.status_code == 403 and "leitura" in r.json()["detail"]
     assert com_login.get("/api/v1/usuarios").status_code == 403
 
 
-def test_supervisor_revisa_com_o_proprio_nome(com_login):
-    _criar("sara@empresa.com", "supervisor", nome="Sara Lima")
-    _login(com_login, "sara@empresa.com")
+@pytest.mark.parametrize("papel,esperado", [("monitora", 200), ("admin", 200), ("supervisor", 403), ("leitura", 403)])
+def test_quem_registra_o_resultado_da_ligacao(com_login, papel, esperado):
+    _criar(f"{papel}@empresa.com", papel, nome=f"Pessoa {papel.title()}")
+    _login(com_login, f"{papel}@empresa.com")
     with SessionLocal() as db:
-        c = Call(id_ligacao=910001, status="done", categoria="SEM_INTERESSE", categoria_ia="SEM_INTERESSE",
-                 motor="openai", confianca=0.9, data_ligacao=datetime(2025, 9, 1, 9))
+        c = Call(status="pendente_avaliacao", caminho_audio="/tmp/x.mp3", data_ligacao=datetime(2025, 9, 1, 9))
         db.add(c)
         db.commit()
-    r = com_login.post(f"/api/v1/calls/{c.id}/revisao", json={"categoria": "SEM_INTERESSE", "revisor": "Outra Pessoa"})
-    assert r.status_code == 200 and r.json()["revisado_por"] == "Sara Lima", "logado, vale o nome da sessão"
-    assert com_login.get("/api/v1/usuarios").status_code == 403, "só administrador gerencia usuários"
+    r = com_login.post(f"/api/v1/calls/{c.id}/resultado", json={"categoria": "SEM_INTERESSE"})
+    assert r.status_code == esperado, r.text
+    if esperado == 200:
+        assert r.json()["avaliado_por"] == f"Pessoa {papel.title()}", "vale o nome da sessão"
+        assert r.json()["avaliacao"]["monitora_id"] is not None
+
+
+def test_monitora_consulta_mas_nao_gerencia_usuarios(com_login):
+    _criar("mona@empresa.com", "monitora")
+    _login(com_login, "mona@empresa.com")
+    assert com_login.get("/api/v1/calls").status_code == 200
+    assert com_login.get("/api/v1/auth/eu").json()["papel_label"] == "Monitora de qualidade"
+    assert com_login.get("/api/v1/usuarios").status_code == 403
 
 
 # --------------------------------------------------------------------------- gestão de usuários
@@ -130,6 +141,7 @@ def test_admin_gerencia_usuarios(com_login):
                                                     "senha": "provisoria-123"}).status_code == 409
     assert com_login.post("/api/v1/usuarios", json={"email": "curta@empresa.com", "nome": "X", "papel": "leitura",
                                                     "senha": "123"}).status_code == 422
+    assert com_login.patch(f"/api/v1/usuarios/{uid}", json={"papel": "monitora"}).json()["papel"] == "monitora"
     assert com_login.patch(f"/api/v1/usuarios/{uid}", json={"papel": "leitura", "ativo": False}).json()["ativo"] is False
     lista = com_login.get("/api/v1/usuarios").json()
     assert {u["email"] for u in lista} == {"adm@empresa.com", "novo@empresa.com"}
