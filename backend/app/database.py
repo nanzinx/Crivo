@@ -45,6 +45,12 @@ def init_db(eng: Engine | None = None):
                     conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {tipo}'))
     migrar_dados(eng)
 
+    from .services import script  # script de vendas: versão 1 vem da transcrição do PDF
+
+    with Session(eng) as db:
+        if script.seed_se_vazio(db):
+            db.commit()
+
 
 # --------------------------------------------------------------------------- migrações de dados
 def _colunas(eng: Engine, tabela: str) -> set[str]:

@@ -5,7 +5,7 @@ def agora() -> datetime:
     """Horário local do servidor (mesma referência das datas do Argus). Configure TZ=America/Sao_Paulo."""
     return datetime.now()
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -117,6 +117,113 @@ class Avaliacao(Base):
     nao_avaliavel_motivo: Mapped[str | None] = mapped_column(Text)
     iniciada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     finalizada_em: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
+    # avaliação do script (fase 2). Sem script_versao_id = registro rápido, só o resultado da ligação.
+    script_versao_id: Mapped[int | None] = mapped_column(ForeignKey("script_versoes.id"), index=True)
+    desfecho: Mapped[str | None] = mapped_column(String(20))  # venda | recusa | outro | sem_conversa
+    observacao: Mapped[str | None] = mapped_column(Text)
+    feedback_fortes: Mapped[str | None] = mapped_column(Text)
+    feedback_melhorar: Mapped[str | None] = mapped_column(Text)
+    nota: Mapped[float | None] = mapped_column(Float)  # 0 a 100
+    falha_critica: Mapped[bool] = mapped_column(Boolean, default=False)
+    # trava: uma monitora por vez; expira sozinha (o autosave renova)
+    trava_usuario_id: Mapped[int | None] = mapped_column(Integer)
+    trava_nome: Mapped[str | None] = mapped_column(String(80))
+    trava_ate: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ScriptVersao(Base):
+    """Versão do script de vendas. Só uma fica ativa; a avaliação guarda a versão com que foi feita.
+
+    status: rascunho (editável) | ativa | arquivada. Versão já usada em avaliação não muda mais.
+    """
+
+    __tablename__ = "script_versoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(120))
+    numero: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="rascunho", index=True)
+    valor_divergencia: Mapped[float] = mapped_column(Float, default=0.5)  # quanto vale um item "com divergência"
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    criado_por: Mapped[str | None] = mapped_column(String(80))
+    publicada_em: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ScriptSecao(Base):
+    """Bloco do script. aplicabilidade: sempre | venda (só se houve venda) | recusa (só se houve recusa)."""
+
+    __tablename__ = "script_secoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    versao_id: Mapped[int] = mapped_column(ForeignKey("script_versoes.id"), index=True)
+    ordem: Mapped[int] = mapped_column(Integer, default=0)
+    titulo: Mapped[str] = mapped_column(String(160))
+    aplicabilidade: Mapped[str] = mapped_column(String(20), default="sempre")
+    orientacao: Mapped[str | None] = mapped_column(Text)
+
+
+class ScriptItem(Base):
+    """Trecho marcável do script (acertou / errou / divergência / não se aplica)."""
+
+    __tablename__ = "script_itens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    secao_id: Mapped[int] = mapped_column(ForeignKey("script_secoes.id"), index=True)
+    ordem: Mapped[int] = mapped_column(Integer, default=0)
+    texto: Mapped[str] = mapped_column(Text)
+    orientacao: Mapped[str | None] = mapped_column(Text)
+    peso: Mapped[float] = mapped_column(Float, default=1.0)
+    critico: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AvaliacaoItem(Base):
+    """Marcação de um item do script numa avaliação."""
+
+    __tablename__ = "avaliacao_itens"
+    __table_args__ = (UniqueConstraint("avaliacao_id", "item_id", name="uq_avaliacao_item"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("script_itens.id"))
+    estado: Mapped[str | None] = mapped_column(String(20))  # acertou | errou | divergencia | nao_se_aplica
+    comentario: Mapped[str | None] = mapped_column(Text)
+
+
+class AvaliacaoMarca(Base):
+    """Marcador no áudio: um momento da gravação, ligado (ou não) a um item do script."""
+
+    __tablename__ = "avaliacao_marcas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("script_itens.id"))
+    segundos: Mapped[float] = mapped_column(Float)
+    tipo: Mapped[str] = mapped_column(String(20), default="nota")  # acertou | errou | divergencia | nota
+    texto: Mapped[str | None] = mapped_column(Text)
+
+
+class AvaliacaoEvento(Base):
+    """Auditoria da avaliação: início, finalização, reabertura (com o que era antes), trava liberada..."""
+
+    __tablename__ = "avaliacao_eventos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    usuario_id: Mapped[int | None] = mapped_column(Integer)
+    usuario_nome: Mapped[str | None] = mapped_column(String(80))
+    acao: Mapped[str] = mapped_column(String(30))
+    detalhe: Mapped[dict | None] = mapped_column(JSON)
+
+
+class Parametro(Base):
+    """Parâmetros da operação editáveis na tela (ex.: meta diária de avaliações por monitora)."""
+
+    __tablename__ = "parametros"
+
+    chave: Mapped[str] = mapped_column(String(60), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(200))
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
 

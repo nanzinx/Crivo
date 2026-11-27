@@ -302,6 +302,10 @@ def registrar_resultado(call_id: int, r: ResultadoIn, request: Request, db: Sess
         raise HTTPException(404, "Ligação não encontrada")
     if c.status in (avaliacoes.PENDENTE, avaliacoes.ERRO) and not c.caminho_audio:
         raise HTTPException(409, "A gravação desta ligação ainda não foi baixada.")
+    a = db.get(Avaliacao, c.avaliacao_id) if c.avaliacao_id else None
+    u = getattr(request.state, "usuario", None)
+    if a and a.status == "rascunho" and avaliacoes.trava_ativa(a) and not avaliacoes.e_minha(a, u):
+        raise HTTPException(409, f"{a.trava_nome or 'Outra monitora'} está avaliando esta ligação agora.")
     avaliacoes.registrar_resultado(db, c, r.categoria, r.subcategoria, r.pediu_nao_ligar, r.nao_avaliavel, r.motivo,
                                    usuario=getattr(request.state, "usuario", None))
     db.commit()
