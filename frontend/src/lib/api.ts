@@ -155,6 +155,33 @@ export type SupervisaoLinha = {
   ciencia: Ciencia | null;
 };
 export type Equipes = { grupos: { nome: string; ligacoes: number }[]; supervisores: { id: number; nome: string; ativo: boolean; grupos: string[] }[] };
+export type PontoLinha = {
+  operador: string;
+  grupo: string | null;
+  entrada_seg: number | null;
+  saida_seg: number | null;
+  jornada_seg: number | null;
+  almoco_inicio: string | null;
+  almoco_fim: string | null;
+  almoco_seg: number | null;
+  tmp_seg: number | null;
+  qtp: number | null;
+  atraso_min: number;
+  observacao: string | null;
+};
+export type PontoRelatorio = {
+  data: string;
+  modo: "completo" | "entrada";
+  resumo: { operadores: number; presentes: number; atrasos: number; almoco_medio_seg: number | null; almoco_acima_1h: number | null; tmp_medio_seg: number | null };
+  linhas: PontoLinha[];
+};
+export type PontoConfig = {
+  grupos: { grupo: string; incluir: boolean; entrada_prevista: string; tolerancia_min: number; operadores: number }[];
+  pausas: { descricao: string; conta: boolean }[];
+  almoco: string;
+  ignorar: string;
+};
+export type PontoImportado = { arquivo: string; tipo: "ponto" | "pausas" | null; data: string | null; linhas: number; erro: string | null; substituiu: boolean };
 export type Fila = { total: number; page: number; page_size: number; itens: FilaItem[]; meta: { diaria: number; feitas_hoje: number } };
 
 export type Call = {
@@ -492,6 +519,18 @@ export const api = {
   darCiencia: (id: number, devolutiva: string) => enviarJson<Ciencia>(`/api/v1/avaliacoes/${id}/ciencia`, "POST", { devolutiva }),
   equipes: () => get<Equipes>("/api/v1/equipes"),
   definirGrupos: (uid: number, grupos: string[]) => enviarJson<{ id: number; grupos: string[] }>(`/api/v1/usuarios/${uid}/grupos`, "PUT", { grupos }),
+  pontoDatas: () => get<{ data: string; tem_pausas: boolean }[]>("/api/v1/ponto/datas"),
+  pontoRelatorio: (p: { data: string; modo: string; grupo?: string }) => get<PontoRelatorio>("/api/v1/ponto/relatorio", p),
+  pontoImportacoes: () =>
+    get<{ id: number; tipo: string; data: string; arquivo: string; linhas: number; importado_em: string; importado_por: string | null }[]>("/api/v1/ponto/importacoes"),
+  pontoImportar: (arquivos: File[]) => {
+    const fd = new FormData();
+    arquivos.forEach((a) => fd.append("arquivos", a));
+    return post<{ arquivos: PontoImportado[] }>("/api/v1/ponto/importar", {}, fd);
+  },
+  pontoConfig: () => get<PontoConfig>("/api/v1/ponto/config"),
+  salvarPontoConfig: (c: Partial<Omit<PontoConfig, "grupos">> & { grupos?: Omit<PontoConfig["grupos"][number], "operadores">[] }) =>
+    enviarJson<PontoConfig>("/api/v1/ponto/config", "PUT", c),
   registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
@@ -547,4 +586,5 @@ export async function baixarGravacoesZip(f: Filters) {
   return { incluidas: Number(r.headers.get("x-gravacoes-incluidas") ?? 0), semAudio: Number(r.headers.get("x-gravacoes-sem-audio") ?? 0) };
 }
 
+export const pontoExportUrl = (p: { data: string; modo: string; grupo?: string }) => `/api/v1/ponto/exportar${qs(p)}`;
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;

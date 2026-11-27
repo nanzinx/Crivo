@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import worker
-from .api import auth, avaliacoes, calls, monitoramento, saude, supervisao, sync, tabulacoes, webhooks
+from .api import auth, avaliacoes, calls, monitoramento, ponto, saude, supervisao, sync, tabulacoes, webhooks
 from .config import settings
 from .database import init_db
 from .services import argus_client, sincronizador
@@ -76,6 +76,7 @@ app.include_router(tabulacoes.router, dependencies=protegido)
 app.include_router(monitoramento.router, dependencies=protegido)
 app.include_router(avaliacoes.router, dependencies=protegido)
 app.include_router(supervisao.router, dependencies=protegido)
+app.include_router(ponto.router, dependencies=protegido)
 
 
 @app.get("/health")

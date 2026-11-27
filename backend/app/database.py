@@ -47,8 +47,10 @@ def init_db(eng: Engine | None = None):
 
     from .services import script  # script de vendas: versão 1 vem da transcrição do PDF
 
+    from .services import ponto  # controle de ponto: configuração inicial = aba Config da planilha
+
     with Session(eng) as db:
-        if script.seed_se_vazio(db):
+        if (script.seed_se_vazio(db) is not None) | ponto.seed_se_vazio(db):
             db.commit()
 
 

@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-133%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-148%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -424,6 +424,27 @@ Ao abrir uma avaliação, o supervisor ouve os trechos marcados, lê as observa�
 
 ---
 
+## 🕘 Controle de ponto
+
+Substitui a planilha *Controle de Ponto - Argus*. Na tela **Controle de ponto**, a monitoria arrasta os CSVs exportados do Argus (entrada/saída e pausas, de um ou mais dias). O Crivo reconhece cada arquivo sozinho e, se o dia já tiver sido importado, substitui.
+
+| Aba | Mostra |
+|---|---|
+| **Dia fechado** | Entrada, saída, jornada, almoço (início, fim e tempo), TMP, QTP e atraso, por colaborador |
+| **Entradas de hoje** | Só entrada e atraso, para o dia em andamento |
+| **Configuração** | Grupos (entra no relatório, entrada prevista, tolerância), pausas que contam no TMP/QTP, nome do almoço e texto para ignorar operadores de teste |
+
+As regras são as mesmas das macros da planilha, e um teste de paridade compara o resultado célula a célula com as abas *Relatório Ontem* e *Relatório Hoje* (com nomes trocados por pseudônimos):
+- **Entrada e saída:** entrada é o horário mais cedo do dia e saída o mais tarde.
+- **Atraso:** compara com o turno previsto mais próximo (`08:30;14:00` = dois turnos) e só conta acima da tolerância.
+- **Almoço:** início e fim do almoço mais longo, e tempo = soma de todos os almoços.
+- **TMP e QTP:** TMP é o tempo total nas pausas que contam e QTP é a quantidade delas. Só entram pausas de quem está no ponto e que começaram no dia.
+- **Grupos e pausas novos:** entram sozinhos na configuração. URA PORT e SEM SUPERVISOR entram fora do relatório.
+
+**Equipe dos operadores.** O ponto traz o *Grupo Atual* de cada operador. A cada importação, o Crivo atualiza a equipe de cada operador e preenche a equipe das ligações sem equipe, inclusive as que chegam depois pelo Argus. Com isso, a pasta de equipe do .zip e a visão do supervisor funcionam sem subir o relatório da discadora.
+
+O supervisor vê só as equipes dele. Importar e configurar: monitora e administrador.
+
 ## 🔔 Alertas e relatório diário
 
 A cada `ALERTA_INTERVALO_MINUTOS` (15), o backend avalia as regras abaixo. Um alerta fica **aberto** enquanto a condição durar e é **resolvido sozinho** quando ela some. A tela *Alertas e relatórios* mostra os abertos, o histórico e quem assumiu cada um.
@@ -492,6 +513,9 @@ Use o botão **Testar** da tela para conferir o envio.
 | `GET` | `/api/v1/supervisao/resumo` · `/avaliacoes` · `/exportar` | Levantamento, lista e CSV das avaliações (só as equipes do supervisor) |
 | `POST` | `/api/v1/avaliacoes/{id}/ciencia` | Supervisor registra a ciência e a devolutiva |
 | `GET` / `PUT` | `/api/v1/equipes` · `/api/v1/usuarios/{id}/grupos` | Equipes conhecidas e vínculo dos supervisores (admin) |
+| `POST` | `/api/v1/ponto/importar` | CSVs do Argus (entrada/saída e pausas); reconhece o tipo e a data sozinho |
+| `GET` | `/api/v1/ponto/relatorio?data=&modo=completo\|entrada` · `/exportar` | Relatório do dia (e CSV) |
+| `GET` / `PUT` | `/api/v1/ponto/config` | Grupos, pausas, nome do almoço e texto para ignorar |
 | `GET` | `/api/v1/alertas` | Alertas abertos, resolvidos, regras e canais |
 | `POST` | `/api/v1/alertas/avaliar` | Avalia as regras agora |
 | `POST` | `/api/v1/alertas/{id}/reconhecer` | Marca quem está cuidando do alerta |
@@ -594,8 +618,9 @@ cd frontend && npm run lint && npm run build
   - Script de vendas versionado (transcrito do PDF) e avaliação item a item com marcações no áudio, nota e falha crítica.
 - [x] **Monitoria humana, fase 3.**
   - Supervisão por equipe (só a própria), levantamento, ciência com devolutiva e exportação.
+- [x] **Monitoria humana, fase 4.**
+  - Controle de ponto no lugar da planilha, com paridade testada; equipe dos operadores vinda do ponto.
 - [ ] **Monitoria humana, próximas fases.**
-  - Controle de ponto (atrasos, pausas, almoço) no lugar da planilha.
   - Painel integrado de monitoria, ponto e alertas.
 
 <div align="center"><sub>Feito para enxergar o que cada ligação realmente foi.</sub></div>

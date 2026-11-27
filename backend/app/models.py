@@ -343,3 +343,79 @@ class AvaliacaoCiencia(Base):
     usuario_nome: Mapped[str] = mapped_column(String(80))
     em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     devolutiva: Mapped[str | None] = mapped_column(Text)
+
+
+# --------------------------------------------------------------------------- controle de ponto (fase 4)
+class PontoImportacao(Base):
+    """Um CSV do Argus importado. tipo: ponto (entrada/saída) | pausas. Reimportar a mesma data substitui."""
+
+    __tablename__ = "ponto_importacoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(20), index=True)
+    data_ref: Mapped[date] = mapped_column(Date, index=True)
+    arquivo: Mapped[str | None] = mapped_column(String(200))
+    linhas: Mapped[int] = mapped_column(Integer, default=0)
+    importado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    importado_por: Mapped[str | None] = mapped_column(String(80))
+
+
+class PontoJornada(Base):
+    """Linha do relatório de entrada/saída do Argus (um operador pode ter mais de uma no dia)."""
+
+    __tablename__ = "ponto_jornadas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    importacao_id: Mapped[int] = mapped_column(ForeignKey("ponto_importacoes.id"), index=True)
+    data: Mapped[date] = mapped_column(Date, index=True)
+    grupo: Mapped[str | None] = mapped_column(String(128), index=True)
+    operador: Mapped[str] = mapped_column(String(160), index=True)
+    entrada_seg: Mapped[int | None] = mapped_column(Integer)  # segundos desde 00:00
+    saida_seg: Mapped[int | None] = mapped_column(Integer)
+
+
+class PontoPausa(Base):
+    """Linha do relatório de pausas do Argus."""
+
+    __tablename__ = "ponto_pausas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    importacao_id: Mapped[int] = mapped_column(ForeignKey("ponto_importacoes.id"), index=True)
+    data: Mapped[date] = mapped_column(Date, index=True)  # dia do início da pausa
+    grupo: Mapped[str | None] = mapped_column(String(128))
+    operador: Mapped[str] = mapped_column(String(160), index=True)
+    descricao: Mapped[str] = mapped_column(String(120))
+    inicio: Mapped[datetime | None] = mapped_column(DateTime)
+    fim: Mapped[datetime | None] = mapped_column(DateTime)
+    segundos: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PontoGrupo(Base):
+    """Configuração por grupo do Argus (aba Config da planilha)."""
+
+    __tablename__ = "ponto_grupos"
+
+    grupo: Mapped[str] = mapped_column(String(128), primary_key=True)
+    incluir: Mapped[bool] = mapped_column(Boolean, default=True)
+    entrada_prevista: Mapped[str | None] = mapped_column(String(60))  # "10:00" ou "08:30;14:00" (vários turnos)
+    tolerancia_min: Mapped[int] = mapped_column(Integer, default=10)
+
+
+class PontoPausaConfig(Base):
+    """Se a pausa conta no TMP/QTP (aba Config da planilha)."""
+
+    __tablename__ = "ponto_pausas_config"
+
+    descricao: Mapped[str] = mapped_column(String(120), primary_key=True)
+    conta: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Operador(Base):
+    """Operador conhecido e a equipe atual dele (vem do "Grupo Atual" do relatório de ponto do Argus)."""
+
+    __tablename__ = "operadores"
+
+    chave: Mapped[str] = mapped_column(String(160), primary_key=True)  # nome normalizado
+    nome: Mapped[str] = mapped_column(String(160))
+    grupo: Mapped[str | None] = mapped_column(String(128))
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
