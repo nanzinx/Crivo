@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     recordings_dir: str = str(DATA / "gravacoes")
+    argus_ponto_automatico: bool = True  # com ARGUS_TOKEN: busca o ponto (entrada/saída e pausas) pela API
+    argus_ponto_minutos: int = 30  # de quanto em quanto tempo atualiza o ponto de hoje e os operadores
     zip_max_gravacoes: int = 1000  # limite de gravações por arquivo .zip exportado
     legacy_csv: str = str(DATA / "relatorio_escuta_gravacoes.csv")
     legacy_html: str = str(DATA / "dashboard_gravacoes.html")

@@ -56,6 +56,44 @@ def sync_argus(data_inicio: date | None = None, data_fim: date | None = None, ul
     return res
 
 
+@router.post("/operadores")
+def sync_operadores(db: Session = Depends(get_db)):
+    """Atualiza agora operadores, ramais, equipes e supervisores a partir da API do Argus."""
+    from ..services import argus_client, argus_operacao
+
+    try:
+        r = argus_operacao.sincronizar_operadores(db)
+    except argus_client.ArgusError as e:
+        status.registrar(status.OPERADORES, False, str(e))
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001 - rede/HTTP
+        status.registrar(status.OPERADORES, False, str(e))
+        raise HTTPException(502, f"Argus indisponível: {e}")
+    db.commit()
+    status.registrar(status.OPERADORES, True, f"{r['operadores']} operadores do Argus")
+    return r
+
+
+@router.post("/ponto")
+def sync_ponto(data: date, pausas: bool = True, db: Session = Depends(get_db)):
+    """Busca agora no Argus o ponto (e as pausas) de um dia."""
+    from ..services import argus_client, argus_operacao
+
+    try:
+        r = argus_operacao.importar_ponto(db, data, pausas)
+    except argus_client.ArgusError as e:
+        db.rollback()
+        status.registrar(status.PONTO, False, str(e))
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        status.registrar(status.PONTO, False, str(e))
+        raise HTTPException(502, f"Argus indisponível: {e}")
+    db.commit()
+    status.registrar(status.PONTO, True, f"ponto de {data.strftime('%d/%m')} pela API")
+    return r
+
+
 @router.post("/process")
 def baixar_pendentes(limit: int | None = 500, db: Session = Depends(get_db)):
     """Põe na fila de download as ligações sem gravação ainda (pendentes ou com erro no download)."""

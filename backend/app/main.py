@@ -29,6 +29,23 @@ async def _poll_argus():
             log.exception("polling Argus")
 
 
+async def _operacao_argus():
+    """Com ARGUS_TOKEN: operadores/equipes e ponto (entrada/saída e pausas) pela API, sem planilha."""
+    from .database import SessionLocal
+    from .services import argus_operacao
+
+    def _rodar():
+        with SessionLocal() as db:
+            argus_operacao.ciclo(db)
+
+    while True:
+        try:
+            await asyncio.to_thread(_rodar)
+        except Exception:  # pragma: no cover - o ciclo já registra a falha na Saúde
+            log.exception("operação Argus (operadores e ponto)")
+        await asyncio.sleep(max(5, settings.argus_ponto_minutos) * 60)
+
+
 def _ciclo_monitoramento() -> None:
     """Avalia os alertas e, na hora certa, gera e envia o relatório do dia."""
     from .database import SessionLocal
@@ -57,8 +74,11 @@ async def lifespan(app: FastAPI):
     worker.start()
     task = asyncio.create_task(_poll_argus()) if settings.argus_token and argus_client.campaign_ids() else None
     monitor = asyncio.create_task(_monitorar())
+    operacao = asyncio.create_task(_operacao_argus()) if settings.argus_token and settings.argus_ponto_automatico else None
     yield
     monitor.cancel()
+    if operacao:
+        operacao.cancel()
     if task:
         task.cancel()
 

@@ -8,7 +8,7 @@ from .. import worker
 from ..config import settings
 from ..database import get_db
 from ..models import Call
-from ..services import ponto, pipeline, status
+from ..services import argus_operacao, ponto, pipeline, status
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
@@ -43,8 +43,9 @@ def upsert_from_argus(db: Session, p: dict, origem: str = "argus") -> Call | Non
     call.operador_id = g("codUsuarioIntegracao", "idUsuario") or call.operador_id
     call.operador_nome = g("nomeUsuario", "usuarioOperador") or call.operador_nome
     call.tabulacao_operador = g("tabulacaoDesc", "tabulado") or call.tabulacao_operador
-    if not call.grupo_origem:  # o Argus não manda a equipe: vem do cadastro de operadores (relatório de ponto)
-        call.grupo_origem = ponto.equipe_do_operador(db, call.operador_nome)
+    if not call.grupo_origem:  # o Argus não manda a equipe: vem do cadastro de operadores (API ou ponto)
+        call.grupo_origem = (argus_operacao.equipe_por_ramal(db, call.operador_id)
+                             or ponto.equipe_do_operador(db, call.operador_nome))
     id_tab = g("idTabulacao", "codTabulacao", "tabulacaoId")
     if id_tab is not None and str(id_tab).isdigit():
         call.id_tabulacao_argus = int(id_tab)

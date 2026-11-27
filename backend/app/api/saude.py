@@ -20,6 +20,8 @@ NOMES = {
     status.DOWNLOAD: "Download de gravações",
     status.IMPORTACAO: "Importação local",
     status.CRUZAMENTO: "Cruzamento com a discadora",
+    status.OPERADORES: "Operadores e equipes (API Argus)",
+    status.PONTO: "Controle de ponto (API Argus)",
 }
 
 
@@ -36,7 +38,7 @@ def _alertas(eventos: dict, por_status: dict, fila: int, now: datetime, pendente
     add = lambda nivel, titulo, msg: out.append({"nivel": nivel, "titulo": titulo, "mensagem": msg})  # noqa: E731
     argus_on = bool(settings.argus_token)
 
-    for chave in (status.POLLING, status.SYNC_MANUAL, status.DOWNLOAD, status.CRUZAMENTO):
+    for chave in (status.POLLING, status.SYNC_MANUAL, status.DOWNLOAD, status.CRUZAMENTO, status.OPERADORES, status.PONTO):
         ev = eventos.get(chave)
         if ev and not ev["ok"]:
             add("critico", f"{NOMES[chave]} falhando", ev["detalhe"] or "Última execução falhou.")

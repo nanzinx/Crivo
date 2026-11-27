@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-154%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-160%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -209,6 +209,45 @@ docker compose up -d --build
 - **Senha do banco:** defina `POSTGRES_PASSWORD` no ambiente ou no `.env` antes de subir (o padrão é só para teste).
 - **HTTPS:** coloque o painel atrás de um proxy com HTTPS e use `COOKIE_SEGURO=true`.
 
+### Publicar na internet (HTTPS) e ligar o Argus
+
+O webhook do Argus precisa alcançar o Crivo por HTTPS. No servidor (Linux com Docker), com um domínio apontando para ele:
+
+```bash
+./scripts/preparar_servidor.sh crivo.suaempresa.com.br
+```
+
+O script prepara o `.env` do servidor:
+- gera ali mesmo a senha do banco e o segredo do webhook (nada passa por chat nem pelo repositório);
+- liga o cookie seguro;
+- mostra a URL exata para cadastrar no Argus.
+
+Depois:
+
+```bash
+docker compose --profile https up -d --build
+```
+
+O perfil `https` sobe o [Caddy](https://caddyserver.com), que pede e renova o certificado sozinho. Libere as portas 80 e 443.
+
+No Argus, cadastre o webhook **"Tabulação Efetuada pelo Operador"** (`idTipoWebhook=2`) com a URL que o script mostrou. A API do Argus não tem comando para cadastrar webhooks: isso é feito no Argus. Por fim, preencha `ARGUS_TOKEN` e `ARGUS_CAMPAIGN_IDS` no `.env` e confira com:
+
+```bash
+docker compose exec backend python -m scripts.argus_diagnostico
+```
+
+O diagnóstico testa o token e mostra o formato das respostas (só nomes de campo, sem dados pessoais).
+
+**O que a API do Argus alimenta sozinha** (com o token):
+
+| O quê | Endpoint | Frequência |
+|---|---|---|
+| Ligações | webhook + `/report/ligacoesdetalhadas` | na hora + a cada `ARGUS_POLL_MINUTOS` |
+| Operadores, ramal, equipe e supervisor | `/cmd/listarusuarios` | a cada `ARGUS_PONTO_MINUTOS` |
+| Ponto: entrada/saída e pausas | `/report/entradasaida`, `/report/pausasdetalhadas` | hoje a cada `ARGUS_PONTO_MINUTOS`; ontem fechado, uma vez depois da meia-noite |
+
+A equipe da ligação vem do ramal do operador (`codUsuarioIntegracao` do webhook). O supervisor de cada equipe segundo o Argus aparece em *Usuários → Equipes dos supervisores*. O manual da API não lista os campos de cada linha dos relatórios de ponto. Se o Argus mandar nomes diferentes dos esperados, a tela Saúde mostra o erro com os campos recebidos, e a importação dos CSVs continua funcionando.
+
 ### Sem Docker (desenvolvimento)
 
 ### Pré-requisitos
@@ -265,6 +304,8 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
 | `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
 | `ZIP_MAX_GRAVACOES` | Máximo de gravações num .zip exportado | `1000` |
+| `ARGUS_PONTO_AUTOMATICO` / `ARGUS_PONTO_MINUTOS` | Operadores e ponto pela API do Argus, e de quanto em quanto tempo | `true` / `30` |
+| `CRIVO_DOMINIO` | Domínio público do HTTPS automático (`--profile https`) | — |
 | `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
 | `LEGACY_CSV` / `LEGACY_HTML` | Escuta manual anterior | `./data/…` |
 | `CORS_ORIGINS` | Origens liberadas no CORS | `http://localhost:3000,…` |
@@ -515,6 +556,8 @@ Use o botão **Testar** da tela para conferir o envio.
 | `POST` | `/api/v1/sync/cruzar` | Cruza o relatório da discadora (upload `multipart` ou `CRUZAR_CSV`) |
 | `POST` | `/api/v1/sync/argus` | Polling/backfill manual |
 | `POST` | `/api/v1/sync/process` | Baixa as gravações pendentes ou com erro |
+| `POST` | `/api/v1/sync/operadores` | Atualiza operadores, ramais, equipes e supervisores pela API do Argus |
+| `POST` | `/api/v1/sync/ponto?data=` | Busca o ponto e as pausas do dia pela API do Argus |
 | `POST` | `/api/v1/sync/reprocess/{id}` | Baixa a gravação de uma ligação de novo |
 | `GET` | `/api/v1/tabulacoes` | Modelo de tabulação com uso e divergência por tabulação |
 | `PUT` | `/api/v1/tabulacoes/{id}` | Confirma/corrige uma tabulação e recalcula as ligações |

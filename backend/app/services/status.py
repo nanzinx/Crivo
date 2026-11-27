@@ -15,6 +15,8 @@ SYNC_MANUAL = "argus_sync"
 DOWNLOAD = "argus_download"
 IMPORTACAO = "importacao_local"
 CRUZAMENTO = "cruzamento"
+OPERADORES = "argus_operadores"
+PONTO = "argus_ponto"
 
 
 def registrar(chave: str, ok: bool, detalhe: str | None = None, db: Session | None = None) -> None:

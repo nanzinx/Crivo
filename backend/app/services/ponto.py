@@ -138,12 +138,16 @@ class Resultado:
 
 def importar(db: Session, arquivo: str, dados: bytes, usuario: str | None = None) -> Resultado:
     """Importa um CSV do Argus (reconhece sozinho se é entrada/saída ou pausas). Mesma data = substitui."""
-    res = Resultado(arquivo=arquivo)
     try:
         linhas = ler_csv(dados)
     except Exception as e:  # noqa: BLE001
-        res.erro = f"não foi possível ler o arquivo ({e})"
-        return res
+        return Resultado(arquivo=arquivo, erro=f"não foi possível ler o arquivo ({e})")
+    return importar_tabela(db, arquivo, linhas, usuario)
+
+
+def importar_tabela(db: Session, arquivo: str, linhas: list[list[str]], usuario: str | None = None) -> Resultado:
+    """Importa uma tabela já lida (cabeçalho + linhas), venha do CSV ou da API do Argus."""
+    res = Resultado(arquivo=arquivo)
     res.tipo = tipo(linhas)
     if res.tipo is None:
         res.erro = "não parece um relatório de entrada/saída nem de pausas do Argus"

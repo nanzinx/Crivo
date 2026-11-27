@@ -1,0 +1,9 @@
+# Publica o Crivo com HTTPS (certificado automático Let's Encrypt).
+# Usado pelo docker compose com o perfil "https": docker compose --profile https up -d --build
+{$CRIVO_DOMINIO} {
+	encode gzip
+	# API e webhook do Argus vão direto para o backend; o resto é o painel
+	@api path /api/* /health /docs /openapi.json
+	reverse_proxy @api backend:8000
+	reverse_proxy frontend:3000
+}

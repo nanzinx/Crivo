@@ -420,3 +420,9 @@ class Operador(Base):
     nome: Mapped[str] = mapped_column(String(160))
     grupo: Mapped[str | None] = mapped_column(String(128))
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime)
+    # vindos da API do Argus (/cmd/listarusuarios)
+    ramal: Mapped[str | None] = mapped_column(String(40), index=True)  # = codUsuarioIntegracao do webhook
+    id_usuario_argus: Mapped[int | None] = mapped_column(Integer)
+    supervisor_argus: Mapped[str | None] = mapped_column(String(160))
+    ativo: Mapped[bool | None] = mapped_column(Boolean)
+    origem: Mapped[str | None] = mapped_column(String(20))  # argus | ponto

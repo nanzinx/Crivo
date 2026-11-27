@@ -154,7 +154,7 @@ export type SupervisaoLinha = {
   feedback_melhorar: string | null;
   ciencia: Ciencia | null;
 };
-export type Equipes = { grupos: { nome: string; ligacoes: number }[]; supervisores: { id: number; nome: string; ativo: boolean; grupos: string[] }[] };
+export type Equipes = { grupos: { nome: string; ligacoes: number; supervisores_argus?: string[] }[]; supervisores: { id: number; nome: string; ativo: boolean; grupos: string[] }[] };
 export type PontoLinha = {
   operador: string;
   grupo: string | null;
@@ -554,6 +554,9 @@ export const api = {
     enviarJson<PontoConfig>("/api/v1/ponto/config", "PUT", c),
   operador: (nome: string, dias = 30) => get<OperadorResumo>(`/api/v1/operadores/${encodeURIComponent(nome)}/resumo`, { dias }),
   painel: () => get<Painel>("/api/v1/painel"),
+  sincronizarOperadores: () => post<{ operadores: number; inativos: number; ligacoes_com_equipe: number }>("/api/v1/sync/operadores"),
+  pontoDoArgus: (data: string) =>
+    post<{ data: string; ponto: { linhas: number; erro: string | null }; pausas?: { linhas: number; erro: string | null } }>("/api/v1/sync/ponto", { data }),
   registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>

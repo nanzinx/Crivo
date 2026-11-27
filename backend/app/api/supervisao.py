@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Avaliacao, AvaliacaoCiencia, Call, Usuario, agora
+from ..models import Avaliacao, AvaliacaoCiencia, Call, Operador, Usuario, agora
 from ..services import equipes, supervisao
 from .auth import escopo_equipe, exigir_admin, exigir_papel
 
@@ -102,7 +102,15 @@ def listar_equipes(db: Session = Depends(get_db), _u=Depends(exigir_admin)):
     grupos = db.execute(select(Call.grupo_origem, func.count(Call.id)).where(Call.grupo_origem.is_not(None))
                         .group_by(Call.grupo_origem).order_by(Call.grupo_origem)).all()
     sups = db.scalars(select(Usuario).where(Usuario.papel == "supervisor").order_by(Usuario.nome)).all()
-    return {"grupos": [{"nome": g, "ligacoes": n} for g, n in grupos],
+    sup_argus: dict[str, set] = {}
+    for g, sup in db.execute(select(Operador.grupo, Operador.supervisor_argus)
+                             .where(Operador.grupo.is_not(None), Operador.supervisor_argus.is_not(None))):
+        sup_argus.setdefault(g, set()).add(sup)
+    contagem = dict(grupos)
+    for (g,) in db.execute(select(Operador.grupo).where(Operador.grupo.is_not(None)).distinct()):
+        contagem.setdefault(g, 0)  # equipe conhecida pelo Argus/ponto, ainda sem ligação
+    return {"grupos": [{"nome": g, "ligacoes": contagem[g], "supervisores_argus": sorted(sup_argus.get(g, ()))}
+                       for g in sorted(contagem)],
             "supervisores": [{"id": s.id, "nome": s.nome, "ativo": s.ativo, "grupos": equipes.grupos_do(db, s.id)}
                              for s in sups]}
 

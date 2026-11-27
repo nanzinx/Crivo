@@ -250,6 +250,14 @@ function Importar() {
     },
     onError: (e) => toast.error((e as Error).message),
   });
+  const argus = useMutation({
+    mutationFn: () => api.pontoDoArgus(new Date().toLocaleDateString("sv-SE")),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("ponto") });
+      toast.success(`Ponto de hoje atualizado pelo Argus: ${fmtInt(r.ponto.linhas)} linhas${r.pausas ? ` e ${fmtInt(r.pausas.linhas)} pausas` : ""}`);
+    },
+    onError: (e) => toast.error((e as Error).message, { duration: 10_000 }),
+  });
   const enviar = (fs: FileList | null) => fs && fs.length && importar.mutate(Array.from(fs));
   const ultima = hist?.[0];
   return (
@@ -275,7 +283,7 @@ function Importar() {
       <div className="min-w-0 flex-1 text-sm">
         <p className="font-medium">Importar relatórios do Argus</p>
         <p className="text-xs text-ink-muted">
-          Arraste os CSVs de entrada/saída e de pausas, de um ou mais dias. O Crivo reconhece cada um e, se o dia já existir, substitui.
+          Com o token do Argus configurado, o ponto chega sozinho a cada 30 min. Sem ele, arraste os CSVs de entrada/saída e de pausas; se o dia já existir, substitui.
           {ultima && ` Última: ${ultima.arquivo} (${fmtDateTime(ultima.importado_em)}).`}
         </p>
         {resultado && (
@@ -290,6 +298,9 @@ function Importar() {
           </ul>
         )}
       </div>
+      <Button variant="outline" size="sm" onClick={() => argus.mutate()} loading={argus.isPending} title="Busca pela API do Argus o ponto e as pausas de hoje (precisa do ARGUS_TOKEN)">
+        Buscar no Argus
+      </Button>
       <input ref={ref} type="file" accept=".csv,text/csv" multiple hidden onChange={(e) => (enviar(e.target.files), (e.target.value = ""))} />
       <Button variant="primary" size="sm" onClick={() => ref.current?.click()} loading={importar.isPending}>
         Escolher arquivos

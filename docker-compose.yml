@@ -1,7 +1,8 @@
-# Crivo: banco + backend + frontend.
-#   cp .env.example .env   (preencha as chaves)
-#   docker compose up -d --build
-# Painel: http://localhost:3000   ·   API/webhook do Argus: http://<servidor>:8000/api/v1/webhooks/argus
+# Crivo: banco + backend + frontend (+ HTTPS opcional com Caddy).
+#   Rede interna:  cp .env.example .env  (preencha)  ->  docker compose up -d --build
+#                  Painel: http://<servidor>:3000 · webhook do Argus: http://<servidor>:8000/api/v1/webhooks/argus
+#   Na internet:   ./scripts/preparar_servidor.sh crivo.suaempresa.com.br  ->  docker compose --profile https up -d --build
+#                  Painel e webhook em https://crivo.suaempresa.com.br (certificado automático)
 services:
   db:
     image: postgres:16-alpine
@@ -49,5 +50,24 @@ services:
     ports:
       - "3000:3000"
 
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      CRIVO_DOMINIO: ${CRIVO_DOMINIO:-localhost}  # o domínio público (scripts/preparar_servidor.sh preenche)
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

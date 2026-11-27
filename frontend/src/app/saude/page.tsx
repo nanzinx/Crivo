@@ -15,6 +15,7 @@ import {
   PlugZap,
   RefreshCw,
   Upload,
+  Users,
   XCircle,
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
@@ -164,7 +165,7 @@ function Contador({ label, value, icon, tone }: { label: string; value: number; 
   );
 }
 
-const ORDEM = ["argus_webhook", "argus_polling", "argus_sync", "argus_download", "importacao_local", "cruzamento"];
+const ORDEM = ["argus_webhook", "argus_polling", "argus_sync", "argus_download", "argus_operadores", "argus_ponto", "importacao_local", "cruzamento"];
 
 function Integracoes({ data }: { data: Saude }) {
   const ev = data.eventos;
@@ -259,6 +260,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
   });
   const processar = useAcao(api.processarPendentes, onDone, (r) => `${r.enfileiradas} gravações na fila de download`);
   const recentes = useAcao(() => api.sincronizarArgus({ ultimos_minutos: 15 }), onDone, (r) => `${r.ligacoes} ligações recebidas do Argus`);
+  const operadores = useAcao(api.sincronizarOperadores, onDone, (r) => `${r.operadores} operadores atualizados · ${r.ligacoes_com_equipe} ligações ganharam equipe`);
   const backfill = useAcao(() => api.sincronizarArgus({ data_inicio: ini, data_fim: fim }), onDone, (r) => `${r.ligacoes} ligações recebidas do Argus`);
   const cruzar = useMutation({
     mutationFn: (f: File) => api.cruzar(f),
@@ -310,6 +312,7 @@ function Acoes({ onDone, pendentes }: { onDone: () => void; pendentes: number })
         <Acao icon={<FolderInput className="h-4 w-4" />} title="Importar acervo local" desc="Pasta de gravações + relatórios configurados no .env" onClick={() => importar.mutate()} loading={importar.isPending} />
         <Acao icon={<Upload className="h-4 w-4" />} title="Baixar gravações pendentes" desc={`${fmtInt(pendentes)} ligações sem gravação ou com erro no download`} onClick={() => processar.mutate()} loading={processar.isPending} />
         <Acao icon={<CloudDownload className="h-4 w-4" />} title="Buscar no Argus (15 min)" desc="Puxa as ligações mais recentes agora" onClick={() => recentes.mutate()} loading={recentes.isPending} />
+        <Acao icon={<Users className="h-4 w-4" />} title="Atualizar operadores e equipes" desc="Busca no Argus quem está em cada equipe e o supervisor" onClick={() => operadores.mutate()} loading={operadores.isPending} />
       </div>
 
       <div className="rounded-2xl border border-line p-3">

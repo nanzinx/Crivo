@@ -176,6 +176,7 @@ function EquipesCard() {
                       )}
                     >
                       {g.nome}
+                      {g.supervisores_argus?.length ? <span className="ml-1 text-[10px] text-ink-muted">· Argus: {g.supervisores_argus.join(", ")}</span> : null}
                     </button>
                   );
                 })}
