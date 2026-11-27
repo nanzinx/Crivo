@@ -14,6 +14,7 @@ import { FilterBar } from "@/components/filters/filter-bar";
 import { useFilters } from "@/components/filters/use-filters";
 import { Button, Card, Empty, Skeleton } from "@/components/ui/primitives";
 import { StatTile } from "@/components/ui/stat-tile";
+import { PainelOperacao } from "@/components/painel/painel-operacao";
 import { api, exportUrl } from "@/lib/api";
 import { fmtInt, fmtPct } from "@/lib/utils";
 
@@ -80,6 +81,8 @@ function Dashboard() {
       )}
 
       {/* KPIs */}
+      <PainelOperacao />
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatTile
           hero

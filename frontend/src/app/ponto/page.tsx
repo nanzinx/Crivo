@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth-context";
 import { Button, Card, Empty, Pill, Select, Skeleton } from "@/components/ui/primitives";
-import { api, pontoExportUrl, type PontoConfig, type PontoImportado, type PontoLinha } from "@/lib/api";
+import Link from "next/link";
+import { api, operadorUrl, pontoExportUrl, type PontoConfig, type PontoImportado, type PontoLinha } from "@/lib/api";
 import { cn, fmtDateTime, fmtDay, fmtInt } from "@/lib/utils";
 
 type Aba = "completo" | "entrada" | "config";
@@ -190,7 +191,9 @@ function Tabela({ linhas, completo }: { linhas: PontoLinha[]; completo: boolean 
             return (
               <tr key={l.operador} className={cn(l.atraso_min > 0 && "bg-critical/[.07]")}>
                 <td className="px-4 py-2 sm:px-0">
-                  <div className={cn("font-medium", l.atraso_min > 0 && "text-critical")}>{l.operador}</div>
+                  <Link href={operadorUrl(l.operador)} className={cn("font-medium hover:underline", l.atraso_min > 0 && "text-critical")}>
+                    {l.operador}
+                  </Link>
                   {l.grupo && <div className="text-[11px] text-ink-muted">{l.grupo}</div>}
                 </td>
                 <td className="num py-2 text-center">{hhmm(l.entrada_seg)}</td>

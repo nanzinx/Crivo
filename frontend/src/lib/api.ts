@@ -182,6 +182,26 @@ export type PontoConfig = {
   ignorar: string;
 };
 export type PontoImportado = { arquivo: string; tipo: "ponto" | "pausas" | null; data: string | null; linhas: number; erro: string | null; substituiu: boolean };
+export type OperadorResumo = {
+  operador: string;
+  equipe: string | null;
+  dias: number;
+  ligacoes: { total: number; avaliadas: number; divergencias: number; altas: number; taxa_divergencia: number };
+  monitoria: {
+    avaliacoes: number;
+    nota_media: number | null;
+    falhas_criticas: number;
+    sem_ciencia: number;
+    notas: { call_id: number; data: string | null; nota: number | null; falha_critica: boolean }[];
+    itens: SupervisaoResumo["itens"];
+    avaliacoes_recentes: SupervisaoLinha[];
+  };
+  ponto: { dias: (PontoLinha & { data: string; completo: boolean })[]; atrasos: number; almoco_acima_1h: number };
+};
+export type Painel = {
+  monitoria: { avaliadas_hoje: number; aguardando: number; nota_media_7d: number | null; falhas_criticas_7d: number; sem_ciencia: number };
+  ponto: (PontoRelatorio["resumo"] & { data: string; completo: boolean; atrasados: { operador: string; minutos: number }[] }) | null;
+};
 export type Fila = { total: number; page: number; page_size: number; itens: FilaItem[]; meta: { diaria: number; feitas_hoje: number } };
 
 export type Call = {
@@ -314,8 +334,9 @@ export type Saude = {
 export type Alerta = {
   id: number;
   chave: string;
-  tipo: "operador" | "tronco" | "nao_ligar" | "sistema";
+  tipo: "operador" | "tronco" | "nao_ligar" | "sistema" | "aderencia" | "falha_critica" | "atraso" | "almoco";
   nivel: "critico" | "atencao";
+  grupo?: string | null;
   titulo: string;
   mensagem: string;
   link: string | null;
@@ -531,6 +552,8 @@ export const api = {
   pontoConfig: () => get<PontoConfig>("/api/v1/ponto/config"),
   salvarPontoConfig: (c: Partial<Omit<PontoConfig, "grupos">> & { grupos?: Omit<PontoConfig["grupos"][number], "operadores">[] }) =>
     enviarJson<PontoConfig>("/api/v1/ponto/config", "PUT", c),
+  operador: (nome: string, dias = 30) => get<OperadorResumo>(`/api/v1/operadores/${encodeURIComponent(nome)}/resumo`, { dias }),
+  painel: () => get<Painel>("/api/v1/painel"),
   registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
@@ -587,4 +610,5 @@ export async function baixarGravacoesZip(f: Filters) {
 }
 
 export const pontoExportUrl = (p: { data: string; modo: string; grupo?: string }) => `/api/v1/ponto/exportar${qs(p)}`;
+export const operadorUrl = (nome: string) => `/operadores/${encodeURIComponent(nome)}`;
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;

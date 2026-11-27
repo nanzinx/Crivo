@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     alerta_tronco_min_ligacoes: int = 20
     alerta_tronco_mudas_pct: float = 40  # % de ligações mudas no tronco (atenção; crítico a partir de 70%)
     alerta_renotificar_horas: int = 6  # não repete a notificação do mesmo alerta antes disso
+    alerta_nota_dias: int = 7  # janela da nota do script por operador
+    alerta_nota_minima: float = 70  # nota média abaixo disso gera alerta (crítico abaixo de 50)
+    alerta_nota_min_avaliacoes: int = 3  # menos avaliações que isso: amostra pequena demais
+    alerta_atraso_dias: int = 7  # dias de ponto olhados para atraso recorrente
+    alerta_atrasos_min: int = 3  # atrasos nessa janela que geram alerta
 
     # ----- Relatório diário -----
     relatorio_hora: int = 19  # gera e envia o relatório do dia a partir desta hora

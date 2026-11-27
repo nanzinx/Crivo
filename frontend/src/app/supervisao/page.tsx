@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from "recharts";
 import { notaTone } from "@/components/avaliacao/calculo";
 import { Button, Card, Empty, Pill, Select, Skeleton } from "@/components/ui/primitives";
-import { api, exportSupervisaoUrl, type SupervisaoFiltros } from "@/lib/api";
+import { api, exportSupervisaoUrl, operadorUrl, type SupervisaoFiltros } from "@/lib/api";
 import { cn, fmtDateTime, fmtDay, fmtInt, isoDate } from "@/lib/utils";
 
 const PERIODOS = [
@@ -179,9 +179,11 @@ export default function SupervisaoPage() {
                   </thead>
                   <tbody className="divide-y divide-line">
                     {r.operadores.map((o) => (
-                      <tr key={o.operador} className="cursor-pointer hover:bg-raised/40" onClick={() => (setOperador(o.operador), setPage(1))}>
+                      <tr key={o.operador} className="hover:bg-raised/40">
                         <td className="px-4 py-2.5 sm:px-0">
-                          <div className="font-medium">{o.operador}</div>
+                          <Link href={operadorUrl(o.operador)} className="font-medium hover:underline">
+                            {o.operador}
+                          </Link>
                           {o.grupo && <div className="text-[11px] text-ink-muted">{o.grupo}</div>}
                         </td>
                         <td className="num py-2.5 text-right">{fmtInt(o.avaliacoes)}</td>

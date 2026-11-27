@@ -219,6 +219,7 @@ function AlertaCard({ a }: { a: Alerta }) {
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
           {a.titulo} <Pill tone={crit ? "critical" : "warn"}>{crit ? "Crítico" : "Atenção"}</Pill>
+          {a.grupo && <Pill>{a.grupo}</Pill>}
         </p>
         <p className="mt-0.5 text-sm text-ink-2">{a.mensagem}</p>
         <p className="mt-1 text-[11px] text-ink-muted">

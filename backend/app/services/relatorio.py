@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Alerta, Avaliacao, Call, Relatorio, agora
+from ..models import (Alerta, Avaliacao, AvaliacaoCiencia, Call, PontoImportacao, PontoJornada, Relatorio,
+                      agora)
 from . import notificacoes
 
 
@@ -58,6 +59,8 @@ def gerar(db: Session, dia: date) -> Relatorio:
         "avaliadas_no_dia": db.scalar(select(func.count(Avaliacao.id)).where(
             Avaliacao.status.in_(("finalizada", "nao_avaliavel")), Avaliacao.finalizada_em >= ini,
             Avaliacao.finalizada_em < fim)) or 0,
+        "monitoria": _monitoria(db, ini, fim),
+        "ponto": _ponto(db, dia),
         "alertas_abertos": [{"nivel": a.nivel, "titulo": a.titulo, "mensagem": a.mensagem}
                             for a in db.scalars(select(Alerta).where(Alerta.resolvido_em.is_(None))
                                                 .order_by(Alerta.nivel, Alerta.aberto_em))],
@@ -68,6 +71,37 @@ def gerar(db: Session, dia: date) -> Relatorio:
     db.add(rel)
     db.commit()
     return rel
+
+
+def _monitoria(db: Session, ini: datetime, fim: datetime) -> dict:
+    """Avaliações do script finalizadas no dia."""
+    from .supervisao import ciencias
+
+    avs = db.scalars(select(Avaliacao).where(Avaliacao.status == "finalizada", Avaliacao.script_versao_id.is_not(None),
+                                             Avaliacao.finalizada_em >= ini, Avaliacao.finalizada_em < fim)).all()
+    notas = [a.nota for a in avs if a.nota is not None]
+    cien = ciencias(db, [a.id for a in avs])
+    sem_ciencia_total = db.scalar(select(func.count(Avaliacao.id)).where(
+        Avaliacao.status == "finalizada", Avaliacao.script_versao_id.is_not(None),
+        Avaliacao.id.not_in(select(AvaliacaoCiencia.avaliacao_id)))) or 0
+    return {"avaliacoes": len(avs), "nota_media": round(sum(notas) / len(notas), 1) if notas else None,
+            "falhas_criticas": sum(1 for a in avs if a.falha_critica), "com_ciencia": len(cien),
+            "sem_ciencia_total": sem_ciencia_total}
+
+
+def _ponto(db: Session, dia: date) -> dict | None:
+    """Ponto do dia, se importado (completo quando as pausas do dia também foram)."""
+    from . import ponto
+
+    if not db.scalar(select(func.count(PontoJornada.id)).where(PontoJornada.data == dia)):
+        return None
+    completo = bool(db.scalar(select(func.count(PontoImportacao.id)).where(
+        PontoImportacao.tipo == "pausas", PontoImportacao.data_ref == dia)))
+    linhas = ponto.relatorio(db, dia, completo)
+    r = ponto.resumo(linhas, completo)
+    r["completo"] = completo
+    r["atrasados"] = [{"operador": v.operador, "minutos": v.atraso_min} for v in linhas if v.atraso_min][:10]
+    return r
 
 
 def _br(n: float, casas: int = 0) -> str:
@@ -99,6 +133,17 @@ def texto(d: dict) -> str:
                    + (f", {o['altas']} alta(s)" if o["altas"] else "") for o in d["operadores"]]
     linhas.append(f"\n👂 Aguardando avaliação: {_br(d['aguardando_avaliacao'])} · "
                   f"avaliadas pela monitoria no dia: {_br(d['avaliadas_no_dia'])}")
+    m = d.get("monitoria")
+    if m and m["avaliacoes"]:
+        linhas.append(f"🎧 Script: {_br(m['avaliacoes'])} avaliações · nota média "
+                      f"{_br(m['nota_media'], 1) if m['nota_media'] is not None else '–'} · "
+                      f"{_br(m['falhas_criticas'])} com falha crítica · {_br(m['sem_ciencia_total'])} aguardando ciência")
+    p = d.get("ponto")
+    if p:
+        extra = (f" · almoço médio {_br((p['almoco_medio_seg'] or 0) / 60)} min · {_br(p['almoco_acima_1h'] or 0)} acima de 1h"
+                 if p.get("completo") else "")
+        linhas.append(f"🕘 Ponto: {_br(p['presentes'])} presentes · {_br(p['atrasos'])} atraso(s){extra}")
+        linhas += [f"   • {a['operador']}: {a['minutos']} min" for a in p["atrasados"]]
     if d["alertas_abertos"]:
         linhas.append("\nAlertas abertos:")
         linhas += [f"{'🔴' if a['nivel'] == 'critico' else '🟠'} {a['titulo']}" for a in d["alertas_abertos"]]
@@ -137,8 +182,33 @@ def html(rel: Relatorio) -> str:
 <h2 style="font-size:15px;margin:20px 0 6px">Resultado das ligações avaliadas</h2>
 <table style="width:100%;border-collapse:collapse;background:#fff"><tr><th {td} align="left">Categoria</th><th {num}>Ligações</th><th {num}>%</th></tr>{cats}</table>
 {f'<h2 style="font-size:15px;margin:20px 0 6px">Alertas abertos</h2><ul>{alertas}</ul>' if alertas else ''}
+{_html_monitoria_ponto(d, td, num)}
 <p style="color:#52514e;font-size:13px;margin-top:20px">Aguardando avaliação: {_br(d.get('aguardando_avaliacao', d.get('fila_revisao', 0)))} · avaliadas no dia: {_br(d.get('avaliadas_no_dia', d.get('revisadas_no_dia', 0)))}</p>
 </div></body></html>"""
+
+
+def _html_monitoria_ponto(d: dict, td: str, num: str) -> str:
+    out = ""
+    m = d.get("monitoria")
+    if m and m["avaliacoes"]:
+        nota = _br(m["nota_media"], 1) if m["nota_media"] is not None else "–"
+        out += (f'<h2 style="font-size:15px;margin:20px 0 6px">Monitoria do script</h2><table style="width:100%;border-collapse:collapse;background:#fff">'
+                f'<tr><td {td}>Avaliações no dia</td><td {num}>{_br(m["avaliacoes"])}</td></tr>'
+                f'<tr><td {td}>Nota média</td><td {num}>{nota}</td></tr>'
+                f'<tr><td {td}>Com falha crítica</td><td {num}>{_br(m["falhas_criticas"])}</td></tr>'
+                f'<tr><td {td}>Aguardando ciência do supervisor (total)</td><td {num}>{_br(m["sem_ciencia_total"])}</td></tr></table>')
+    p = d.get("ponto")
+    if p:
+        linhas = (f'<tr><td {td}>Presentes</td><td {num}>{_br(p["presentes"])}</td></tr>'
+                  f'<tr><td {td}>Atrasos</td><td {num}>{_br(p["atrasos"])}</td></tr>')
+        if p.get("completo"):
+            linhas += (f'<tr><td {td}>Almoço médio</td><td {num}>{_br((p["almoco_medio_seg"] or 0) / 60)} min</td></tr>'
+                       f'<tr><td {td}>Almoço acima de 1h</td><td {num}>{_br(p["almoco_acima_1h"] or 0)}</td></tr>')
+        linhas += "".join(f'<tr><td {td}>⏰ {escape(a["operador"])}</td><td {num}>{a["minutos"]} min de atraso</td></tr>'
+                          for a in p["atrasados"])
+        out += (f'<h2 style="font-size:15px;margin:20px 0 6px">Ponto</h2>'
+                f'<table style="width:100%;border-collapse:collapse;background:#fff">{linhas}</table>')
+    return out
 
 
 def enviar(db: Session, rel: Relatorio) -> dict:

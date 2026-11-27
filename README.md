@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-148%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-154%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -424,6 +424,19 @@ Ao abrir uma avaliação, o supervisor ouve os trechos marcados, lê as observa�
 
 ---
 
+## 👤 Painel por operador
+
+A **Visão geral** abre com o resumo da operação:
+- **Monitoria:** aguardando avaliação, avaliadas hoje, nota média e falhas críticas em 7 dias, avaliações sem ciência.
+- **Ponto do último dia:** presentes, atrasos (com os nomes) e almoço acima de 1h.
+
+Clicar num operador (na Supervisão, no Ponto ou nos atrasados) abre a **página do operador**. Ela junta:
+- a nota do script avaliação a avaliação;
+- os trechos que ele mais erra;
+- a divergência de tabulação;
+- o ponto dos últimos dias;
+- as avaliações recentes, com o feedback e a ciência.
+
 ## 🕘 Controle de ponto
 
 Substitui a planilha *Controle de Ponto - Argus*. Na tela **Controle de ponto**, a monitoria arrasta os CSVs exportados do Argus (entrada/saída e pausas, de um ou mais dias). O Crivo reconhece cada arquivo sozinho e, se o dia já tiver sido importado, substitui.
@@ -455,10 +468,16 @@ A cada `ALERTA_INTERVALO_MINUTOS` (15), o backend avalia as regras abaixo. Um al
 | Pico de mudas num tronco | 40%+ de ligações mudas em 3h (mínimo de 20) e 1,5× acima dos outros troncos. **Crítico** a partir de 70% |
 | Pedido de não ligar sem registro | Qualquer caso nas últimas 24h (LGPD) |
 | Falha crítica do sistema | Alertas críticos da tela Saúde do sistema (integração falhando, downloads parados) |
+| Nota baixa no script | Nota média abaixo de 70 em 7 dias, com no mínimo 3 avaliações. **Crítico** abaixo de 50 |
+| Falha crítica no script | Avaliação com item crítico errado (documento, anuência, texto de confirmação) nas últimas 24h |
+| Atraso recorrente | 3 ou mais atrasos nos últimos 7 dias de ponto |
+| Almoço acima de 1h | Colaboradores com almoço acima de 1h no último dia fechado do ponto (um alerta por equipe) |
+
+Os alertas de operador guardam a equipe dele: o supervisor vê os da própria equipe e os gerais (tronco, LGPD, sistema).
 
 Todos os limites são ajustáveis no `.env` (`ALERTA_*`). A notificação sai quando o alerta abre ou piora para crítico, e não se repete antes de `ALERTA_RENOTIFICAR_HORAS` (6).
 
-**Relatório diário:** gerado e enviado sozinho a partir de `RELATORIO_HORA` (19h), nos dias de `RELATORIO_DIAS` (`0-5` = segunda a sábado). Também pode ser gerado e enviado pela tela.
+**Relatório diário:** traz também a monitoria do dia (avaliações, nota média, falhas críticas, aguardando ciência) e o ponto (presentes, atrasos com os nomes, almoço). É gerado e enviado sozinho a partir de `RELATORIO_HORA` (19h), nos dias de `RELATORIO_DIAS` (`0-5` = segunda a sábado). Também pode ser gerado e enviado pela tela.
 
 **Para onde vai.** Sem nenhum canal configurado, tudo fica só no painel. Os canais:
 
@@ -516,6 +535,8 @@ Use o botão **Testar** da tela para conferir o envio.
 | `POST` | `/api/v1/ponto/importar` | CSVs do Argus (entrada/saída e pausas); reconhece o tipo e a data sozinho |
 | `GET` | `/api/v1/ponto/relatorio?data=&modo=completo\|entrada` · `/exportar` | Relatório do dia (e CSV) |
 | `GET` / `PUT` | `/api/v1/ponto/config` | Grupos, pausas, nome do almoço e texto para ignorar |
+| `GET` | `/api/v1/operadores/{nome}/resumo?dias=30` | Página do operador: ligações, monitoria e ponto |
+| `GET` | `/api/v1/painel` | Resumo de monitoria e ponto da Visão geral |
 | `GET` | `/api/v1/alertas` | Alertas abertos, resolvidos, regras e canais |
 | `POST` | `/api/v1/alertas/avaliar` | Avalia as regras agora |
 | `POST` | `/api/v1/alertas/{id}/reconhecer` | Marca quem está cuidando do alerta |
@@ -620,7 +641,7 @@ cd frontend && npm run lint && npm run build
   - Supervisão por equipe (só a própria), levantamento, ciência com devolutiva e exportação.
 - [x] **Monitoria humana, fase 4.**
   - Controle de ponto no lugar da planilha, com paridade testada; equipe dos operadores vinda do ponto.
-- [ ] **Monitoria humana, próximas fases.**
-  - Painel integrado de monitoria, ponto e alertas.
+- [x] **Monitoria humana, fase 5.**
+  - Alertas de nota baixa, falha crítica, atraso recorrente e almoço longo (por equipe); relatório diário com monitoria e ponto; painel da operação e página do operador.
 
 <div align="center"><sub>Feito para enxergar o que cada ligação realmente foi.</sub></div>

@@ -4,7 +4,13 @@ Regras (limites no .env, ver config.py):
 - operador: taxa de divergência alta numa janela (crítico com muitas divergências de gravidade alta);
 - tronco: pico de ligações mudas num tronco, bem acima dos outros (sinal de problema na linha);
 - nao_ligar: pedido de "não ligar" sem registro na tabulação (LGPD);
-- sistema: alertas CRÍTICOS da saúde do sistema (integração caída...).
+- sistema: alertas CRÍTICOS da saúde do sistema (integração caída...);
+- aderencia: nota média do script baixa por operador (avaliações da monitoria);
+- falha_critica: avaliação com item crítico errado (documento, anuência, texto de confirmação) nas últimas 24h;
+- atraso: operador com atrasos recorrentes no ponto;
+- almoco: colaboradores com almoço acima de 1h no último dia fechado do ponto.
+
+Alertas de operador guardam a equipe dele: o supervisor vê só os das equipes dele (e os gerais).
 
 Só contam as ligações avaliadas pela monitora (status "avaliada"): é delas que vem o resultado.
 
@@ -19,8 +25,8 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Alerta, Call, agora
-from . import avaliacoes, notificacoes
+from ..models import Alerta, Avaliacao, Call, PontoImportacao, PontoJornada, agora
+from . import avaliacoes, notificacoes, ponto
 
 log = logging.getLogger("alertas")
 
@@ -29,6 +35,10 @@ REGRAS = {
     "tronco": "Pico de ligações mudas num tronco",
     "nao_ligar": "Pedido de não ligar sem registro (LGPD)",
     "sistema": "Falha crítica do sistema",
+    "aderencia": "Nota baixa no script (monitoria)",
+    "falha_critica": "Falha crítica na avaliação do script",
+    "atraso": "Atraso recorrente no ponto",
+    "almoco": "Almoço acima de 1h",
 }
 
 
@@ -68,6 +78,7 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
             continue
         out.append({
             "chave": f"operador:{nome}", "tipo": "operador", "nivel": "critico" if critico else "atencao",
+            "grupo": _equipe(db, nome),
             "titulo": f"Divergência alta: {nome}", "valor": round(taxa, 1),
             "mensagem": (f"{nome}: {div} de {n} ligações avaliadas divergentes ({taxa:.0f}%), {altas} de gravidade "
                          f"alta, {_janela(settings.alerta_operador_horas)}."),
@@ -125,6 +136,98 @@ def _condicoes(db: Session, t: datetime) -> list[dict]:
                             "titulo": a["titulo"], "mensagem": a["mensagem"], "link": "/saude", "valor": None})
     except Exception:  # pragma: no cover - a saúde nunca deve derrubar os alertas de negócio
         log.exception("falha ao ler a saúde do sistema")
+
+    out += _monitoria(db, t) + _ponto(db, t)
+    return out
+
+
+def _equipe(db: Session, operador: str | None) -> str | None:
+    """Equipe do operador: cadastro vindo do ponto ou, sem ele, a equipe da ligação mais recente."""
+    g = ponto.equipe_do_operador(db, operador)
+    if g or not operador:
+        return g
+    return db.scalar(select(Call.grupo_origem).where(Call.operador_nome == operador, Call.grupo_origem.is_not(None))
+                     .order_by(Call.data_ligacao.desc()).limit(1))
+
+
+def _monitoria(db: Session, t: datetime) -> list[dict]:
+    out: list[dict] = []
+    script = (Avaliacao.status == "finalizada", Avaliacao.script_versao_id.is_not(None))
+    # nota média baixa por operador
+    ini = t - timedelta(days=settings.alerta_nota_dias)
+    rows = db.execute(
+        select(Call.operador_nome, func.count(Avaliacao.id), func.avg(Avaliacao.nota))
+        .join(Call, Call.id == Avaliacao.call_id)
+        .where(*script, Avaliacao.nota.is_not(None), Call.operador_nome.is_not(None), Call.data_ligacao >= ini,
+               Call.data_ligacao <= t)
+        .group_by(Call.operador_nome)).all()
+    for nome, n, media in rows:
+        if n < settings.alerta_nota_min_avaliacoes or media is None or media >= settings.alerta_nota_minima:
+            continue
+        out.append({
+            "chave": f"aderencia:{nome}", "tipo": "aderencia", "nivel": "critico" if media < 50 else "atencao",
+            "grupo": _equipe(db, nome), "titulo": f"Nota baixa no script: {nome}", "valor": round(media, 1),
+            "mensagem": (f"{nome}: nota média {media:.0f} em {n} avaliações da monitoria nos últimos "
+                         f"{settings.alerta_nota_dias} dias (mínimo esperado: {settings.alerta_nota_minima:.0f})."),
+            "link": _link("/supervisao", operador=nome),
+        })
+    # falha crítica (item crítico errado) avaliada nas últimas 24h
+    rows = db.execute(
+        select(Call.operador_nome, func.count(Avaliacao.id))
+        .join(Call, Call.id == Avaliacao.call_id)
+        .where(*script, Avaliacao.falha_critica.is_(True), Avaliacao.finalizada_em >= t - timedelta(hours=24),
+               Avaliacao.finalizada_em <= t)
+        .group_by(Call.operador_nome)).all()
+    for nome, n in rows:
+        nome = nome or "Operador não identificado"
+        out.append({
+            "chave": f"falha_critica:{nome}", "tipo": "falha_critica", "nivel": "critico", "grupo": _equipe(db, nome),
+            "titulo": f"Falha crítica no script: {nome}", "valor": n,
+            "mensagem": (f"{nome}: {n} avaliação(ões) com item crítico errado nas últimas 24h (documento, anuência "
+                         "ou texto de confirmação). Veja o trecho marcado e dê a devolutiva."),
+            "link": _link("/supervisao", operador=nome),
+        })
+    return out
+
+
+def _ponto(db: Session, t: datetime) -> list[dict]:
+    out: list[dict] = []
+    dias = db.scalars(select(PontoJornada.data).distinct().where(PontoJornada.data <= t.date())
+                      .order_by(PontoJornada.data.desc()).limit(settings.alerta_atraso_dias)).all()
+    if not dias:
+        return out
+    # atraso recorrente
+    atrasos: dict[str, list] = {}
+    for d in dias:
+        for v in ponto.relatorio(db, d, completo=False):
+            if v.atraso_min:
+                atrasos.setdefault(v.operador, []).append((d, v.atraso_min, v.grupo))
+    for nome, lista in atrasos.items():
+        if len(lista) < settings.alerta_atrasos_min:
+            continue
+        total = sum(m for _, m, _ in lista)
+        out.append({
+            "chave": f"atraso:{nome}", "tipo": "atraso", "nivel": "atencao", "grupo": lista[0][2],
+            "titulo": f"Atraso recorrente: {nome}", "valor": len(lista),
+            "mensagem": (f"{nome}: {len(lista)} atrasos nos últimos {len(dias)} dias de ponto ({total} min no total; "
+                         f"último em {lista[0][0].strftime('%d/%m')})."),
+            "link": "/ponto",
+        })
+    # almoço acima de 1h no último dia fechado (com pausas importadas)
+    fechado = db.scalar(select(func.max(PontoImportacao.data_ref)).where(PontoImportacao.tipo == "pausas",
+                                                                       PontoImportacao.data_ref <= t.date()))
+    if fechado:
+        por_grupo: dict[str | None, list[str]] = {}
+        for v in ponto.relatorio(db, fechado, completo=True):
+            if (v.almoco_seg or 0) > 3600:
+                por_grupo.setdefault(v.grupo, []).append(f"{v.operador} ({v.almoco_seg // 60} min)")
+        for g, nomes in por_grupo.items():
+            out.append({
+                "chave": f"almoco:{g or '-'}:{fechado.isoformat()}", "tipo": "almoco", "nivel": "atencao", "grupo": g,
+                "titulo": f"Almoço acima de 1h{f' · {g}' if g else ''}", "valor": len(nomes),
+                "mensagem": f"Em {fechado.strftime('%d/%m')}: " + ", ".join(nomes) + ".",
+                "link": "/ponto",
+            })
     return out
 
 
@@ -139,14 +242,14 @@ def avaliar(db: Session, t: datetime | None = None, notificar: bool = True) -> d
         a = abertos.get(chave)
         if a is None:
             a = Alerta(chave=chave, tipo=c["tipo"], nivel=c["nivel"], titulo=c["titulo"], mensagem=c["mensagem"],
-                       link=c["link"], valor=c["valor"], aberto_em=t, atualizado_em=t)
+                       link=c["link"], valor=c["valor"], grupo=c.get("grupo"), aberto_em=t, atualizado_em=t)
             db.add(a)
             novos.append(a)
             continue
         if a.nivel == "atencao" and c["nivel"] == "critico":
             piorou.append(a)
-        a.nivel, a.titulo, a.mensagem, a.link, a.valor, a.atualizado_em = (
-            c["nivel"], c["titulo"], c["mensagem"], c["link"], c["valor"], t)
+        a.nivel, a.titulo, a.mensagem, a.link, a.valor, a.grupo, a.atualizado_em = (
+            c["nivel"], c["titulo"], c["mensagem"], c["link"], c["valor"], c.get("grupo"), t)
     for chave, a in abertos.items():
         if chave not in atuais:
             a.resolvido_em = t
@@ -185,6 +288,6 @@ def _mensagem(alertas: list[Alerta]) -> tuple[str, str, str]:
 def serializar(a: Alerta) -> dict:
     iso = lambda d: d.isoformat() if d else None  # noqa: E731
     return {"id": a.id, "chave": a.chave, "tipo": a.tipo, "nivel": a.nivel, "titulo": a.titulo, "mensagem": a.mensagem,
-            "link": a.link, "valor": a.valor, "aberto_em": iso(a.aberto_em), "atualizado_em": iso(a.atualizado_em),
+            "link": a.link, "valor": a.valor, "grupo": a.grupo, "aberto_em": iso(a.aberto_em), "atualizado_em": iso(a.atualizado_em),
             "resolvido_em": iso(a.resolvido_em), "notificado_em": iso(a.notificado_em),
             "reconhecido_por": a.reconhecido_por, "reconhecido_em": iso(a.reconhecido_em)}

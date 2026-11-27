@@ -18,7 +18,7 @@ from sqlalchemy import delete, inspect, select, text, update
 from app.database import SessionLocal, init_db
 from app.models import (Avaliacao, AvaliacaoCiencia, AvaliacaoEvento, AvaliacaoItem, AvaliacaoMarca, Call,
                         ContactIdentity)
-from app.services import avaliacoes, pipeline, script, status
+from app.services import avaliacoes, pipeline, ponto, script, status
 
 OPERADORES = ["Ana Lima", "Bruno Costa", "Carla Dias", "Diego Rocha", "Elisa Prado", "Fábio Nunes",
               "Gabi Torres", "Hugo Melo", "Íris Campos", "João Reis"]
@@ -140,6 +140,9 @@ def gerar(n: int, seed: int = 42) -> int:
                     _avaliar_script(db, rng, a, roteiro, "venda" if sub == "ACEITE_VERBAL" else "recusa"
                                     if cat == "SEM_INTERESSE" else "outro", erro_op[op], dia < hoje - timedelta(days=3))
         db.commit()
+    with SessionLocal() as db:
+        _ponto_demo(db, rng, hoje.date())
+        db.commit()
     status.registrar(status.IMPORTACAO, True, f"{n} ligações de demonstração")
     return n
 
@@ -175,6 +178,53 @@ def _avaliar_script(db, rng, a, roteiro, desfecho, taxa_erro, com_ciencia):
                                 em=a.finalizada_em + timedelta(days=1), devolutiva="Conversado no 1:1 (demonstração)."))
 
 
+PAUSAS_DEMO = [("NOVO LEAD", 3, 60), ("PESQUISANDO LEAD", 20, 240), ("LIGAÇÃO - WPP", 60, 600), ("Banheiro", 60, 420),
+               ("Feedback", 60, 300)]
+
+
+def _ponto_demo(db, rng, hoje):
+    """Ponto fictício dos operadores da demonstração (5 dias úteis), importado como os CSVs do Argus."""
+    from app.models import PontoGrupo
+
+    for g in GRUPOS:
+        row = db.get(PontoGrupo, g) or PontoGrupo(grupo=g)
+        row.incluir, row.tolerancia_min = True, 10
+        row.entrada_prevista = "08:30;14:00" if "DIGITAL" in g else "10:00"
+        db.add(row)
+    db.flush()
+    equipe_op = {op: GRUPOS[i % len(GRUPOS)] for i, op in enumerate(OPERADORES)}
+    atrasa = {op: rng.random() < 0.25 for op in OPERADORES}  # alguns operadores costumam atrasar
+    dias = [hoje - timedelta(days=k) for k in range(8) if (hoje - timedelta(days=k)).weekday() < 6][:5]
+    for dia in sorted(dias):
+        ponto_csv = ['"Data";"Grupo Atual";"Operador";"Entrada";"Saída"']
+        pausas_csv = ['" ";"Grupo Operacional";"Operador";"Descrição da Pausa";"Inicio";"Fim";"Tempo"']
+        for op in OPERADORES:
+            g = equipe_op[op]
+            base = (14 * 60 if "DIGITAL" in g and OPERADORES.index(op) % 2 else 10 * 60) if "DIGITAL" in g else 10 * 60
+            ent = base + (rng.randint(12, 35) if atrasa[op] and rng.random() < 0.6 else rng.randint(-9, 6))
+            sai = ent + 7 * 60 + rng.randint(-5, 10)
+            fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"  # noqa: E731
+            ponto_csv.append(f'"{dia.isoformat()}";"{g}";"{op}";"{fmt(ent)}";"{fmt(sai) if dia < hoje else ""}"')
+            if dia == hoje:
+                continue
+            t = datetime.combine(dia, datetime.min.time()) + timedelta(minutes=ent + 20)
+            almoco_ini = datetime.combine(dia, datetime.min.time()) + timedelta(minutes=ent + 180 + rng.randint(0, 40))
+            almoco_seg = rng.randint(40, 58) * 60 if rng.random() < 0.85 else rng.randint(62, 80) * 60
+            pausas = [("Almoço", almoco_ini, almoco_seg)]
+            while t < almoco_ini + timedelta(hours=3):
+                desc, mn, mx = rng.choice(PAUSAS_DEMO)
+                seg = rng.randint(mn, mx)
+                pausas.append((desc, t, seg))
+                t += timedelta(seconds=seg + rng.randint(300, 1500))
+            for desc, ini, seg in pausas:
+                fim = ini + timedelta(seconds=seg)
+                f2 = lambda d: d.strftime("%d/%m/%Y %H:%M:%S")  # noqa: E731
+                pausas_csv.append(f'"";"{g}";"{op}";"{desc}";"{f2(ini)}";"{f2(fim)}";"{seg // 3600:02d}:{seg // 60 % 60:02d}:{seg % 60:02d}"')
+        ponto.importar(db, f"ENTRADA-SAIDA-{dia.isoformat()}.csv", "\r\n".join(ponto_csv).encode("cp1252"), "Demonstração")
+        if dia < hoje:
+            ponto.importar(db, f"PAUSAS-{dia.isoformat()}.csv", "\r\n".join(pausas_csv).encode("cp1252"), "Demonstração")
+
+
 def limpar() -> int:
     with SessionLocal() as db:
         demo = select(Call.id).where(Call.origem == "demo")
@@ -188,6 +238,13 @@ def limpar() -> int:
         db.execute(delete(ContactIdentity).where(ContactIdentity.id_call_evidencia.in_(demo)))
         db.execute(update(Call).where(Call.ligacao_referencia_id.in_(demo)).values(ligacao_referencia_id=None))
         n = db.execute(delete(Call).where(Call.origem == "demo")).rowcount
+        from app.models import Operador, PontoImportacao, PontoJornada, PontoPausa
+
+        imps = select(PontoImportacao.id).where(PontoImportacao.importado_por == "Demonstração")
+        db.execute(delete(PontoJornada).where(PontoJornada.importacao_id.in_(imps)))
+        db.execute(delete(PontoPausa).where(PontoPausa.importacao_id.in_(imps)))
+        db.execute(delete(PontoImportacao).where(PontoImportacao.importado_por == "Demonstração"))
+        db.execute(delete(Operador).where(Operador.nome.in_(OPERADORES)))
         db.commit()
     return n
 

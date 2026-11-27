@@ -265,7 +265,8 @@ class Alerta(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     chave: Mapped[str] = mapped_column(String(160), index=True)  # identifica a condição (ex.: "operador:Ana")
-    tipo: Mapped[str] = mapped_column(String(30))  # operador | tronco | nao_ligar | sistema
+    tipo: Mapped[str] = mapped_column(String(30))  # operador | tronco | nao_ligar | sistema | aderencia | falha_critica | atraso | almoco
+    grupo: Mapped[str | None] = mapped_column(String(128), index=True)  # equipe (supervisor vê só as dele); None = geral
     nivel: Mapped[str] = mapped_column(String(10))  # critico | atencao
     titulo: Mapped[str] = mapped_column(String(160))
     mensagem: Mapped[str] = mapped_column(Text)

@@ -4,14 +4,14 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import false, or_, select, true
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
 from ..models import Alerta, Relatorio, agora
 from ..services import alertas, notificacoes, relatorio
-from .auth import nome_do_usuario
+from .auth import escopo_equipe, nome_do_usuario
 
 router = APIRouter(prefix="/api/v1", tags=["monitoramento"])
 
@@ -29,14 +29,30 @@ def _regras() -> list[dict]:
          "descricao": "Cliente pediu para não ligar e a tabulação não registrou, nas últimas 24h."},
         {"tipo": "sistema", "nome": alertas.REGRAS["sistema"],
          "descricao": "Alertas críticos da Saúde do sistema (integração falhando...)."},
+        {"tipo": "aderencia", "nome": alertas.REGRAS["aderencia"],
+         "descricao": f"Nota média do script abaixo de {s.alerta_nota_minima:g} em {s.alerta_nota_dias} dias (mínimo de "
+                      f"{s.alerta_nota_min_avaliacoes} avaliações). Crítico abaixo de 50."},
+        {"tipo": "falha_critica", "nome": alertas.REGRAS["falha_critica"],
+         "descricao": "Avaliação com item crítico errado (documento, anuência, texto de confirmação) nas últimas 24h."},
+        {"tipo": "atraso", "nome": alertas.REGRAS["atraso"],
+         "descricao": f"{s.alerta_atrasos_min} ou mais atrasos nos últimos {s.alerta_atraso_dias} dias de ponto."},
+        {"tipo": "almoco", "nome": alertas.REGRAS["almoco"],
+         "descricao": "Colaboradores com almoço acima de 1h no último dia fechado do ponto (um alerta por equipe)."},
     ]
 
 
+def _visivel(grupos: list[str] | None):
+    """Supervisor: alertas das equipes dele e os gerais (sem equipe: tronco, LGPD, sistema)."""
+    if grupos is None:
+        return true()
+    return or_(Alerta.grupo.is_(None), Alerta.grupo.in_(grupos) if grupos else false())
+
+
 @router.get("/alertas")
-def listar(db: Session = Depends(get_db)):
-    abertos = db.scalars(select(Alerta).where(Alerta.resolvido_em.is_(None))
+def listar(db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
+    abertos = db.scalars(select(Alerta).where(Alerta.resolvido_em.is_(None), _visivel(grupos))
                          .order_by(Alerta.nivel, Alerta.aberto_em.desc())).all()
-    recentes = db.scalars(select(Alerta).where(Alerta.resolvido_em.is_not(None))
+    recentes = db.scalars(select(Alerta).where(Alerta.resolvido_em.is_not(None), _visivel(grupos))
                           .order_by(Alerta.resolvido_em.desc()).limit(30)).all()
     return {
         "abertos": [alertas.serializar(a) for a in abertos],
