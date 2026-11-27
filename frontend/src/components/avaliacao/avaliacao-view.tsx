@@ -31,12 +31,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { useAuth } from "@/components/auth-context";
 import { Button, Card, CategoryBadge, Pill } from "@/components/ui/primitives";
 import {
   api,
   audioUrl,
   type AvaliacaoCompleta,
   type Call,
+  type Ciencia,
   type Desfecho,
   type EstadoItem,
   type Marca,
@@ -858,6 +860,7 @@ export function AvaliacaoView({
             </p>
           </section>
 
+          {av.status === "finalizada" && <CienciaCard avaliacaoId={av.id} inicial={inicial.ciencia ?? null} />}
           {av.eventos.length > 0 && <Auditoria eventos={av.eventos} />}
         </div>
       </div>
@@ -1265,6 +1268,77 @@ function Texto({
         className="w-full resize-none rounded-xl border border-line bg-surface p-2.5 text-sm outline-none focus:border-brand"
       />
     </label>
+  );
+}
+
+function CienciaCard({ avaliacaoId, inicial }: { avaliacaoId: number; inicial: Ciencia | null }) {
+  const { usuario, estado } = useAuth();
+  const pode = !estado?.auth_ativo || usuario?.papel === "supervisor" || usuario?.papel === "admin";
+  const [ci, setCi] = useState(inicial);
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState(inicial?.devolutiva ?? "");
+  const qc = useQueryClient();
+  const salvar = useMutation({
+    mutationFn: () => api.darCiencia(avaliacaoId, texto),
+    onSuccess: (r) => {
+      setCi(r);
+      setEditando(false);
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("sup-") });
+      toast.success("Ciência registrada");
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  if (!ci && !pode) {
+    return (
+      <section className="card p-4 text-sm text-ink-muted">
+        <h2 className="card-title mb-1 text-ink">Ciência do supervisor</h2>O supervisor da equipe ainda não registrou a devolutiva ao operador.
+      </section>
+    );
+  }
+  return (
+    <section className={cn("card p-4", !ci && "border-warn/50")}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="card-title">Ciência do supervisor</h2>
+        {ci ? (
+          <Pill tone="good">
+            <Check className="h-3 w-3" /> {ci.por} · {fmtDateTime(ci.em)}
+          </Pill>
+        ) : (
+          <Pill tone="warn">pendente</Pill>
+        )}
+      </div>
+      {ci && !editando ? (
+        <div className="space-y-2 text-sm">
+          <p className="text-ink-2">{ci.devolutiva || "Ciência sem devolutiva escrita."}</p>
+          {pode && (
+            <Button size="sm" variant="ghost" onClick={() => setEditando(true)}>
+              Atualizar devolutiva
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={3}
+            placeholder="Como foi a devolutiva ao operador? (ex.: conversado no 1:1, combinou treinar a abertura)"
+            aria-label="Devolutiva ao operador"
+            className="w-full resize-none rounded-xl border border-line bg-surface p-2.5 text-sm outline-none focus:border-brand"
+          />
+          <div className="flex justify-end gap-2">
+            {editando && (
+              <Button size="sm" variant="ghost" onClick={() => setEditando(false)}>
+                Cancelar
+              </Button>
+            )}
+            <Button size="sm" variant="primary" onClick={() => salvar.mutate()} loading={salvar.isPending}>
+              <Check className="h-3.5 w-3.5" /> Registrar ciência
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-122%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-128%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -302,7 +302,7 @@ O painel exige login (`AUTH_ATIVO=true`, padrão).
 |---|---|
 | **Administrador** | Tudo, inclusive gerenciar usuários e registrar o resultado das ligações |
 | **Monitora de qualidade** | Ouvir as ligações e registrar o resultado, além do que o supervisor faz |
-| **Supervisor** | Consultar, confirmar tabulações, importar, sincronizar e cuidar dos alertas |
+| **Supervisor** | Consultar **só as equipes vinculadas a ele**, dar ciência das avaliações, confirmar tabulações, importar, sincronizar e cuidar dos alertas |
 | **Só leitura** | Apenas consultar |
 
 **Como funciona:**
@@ -381,7 +381,21 @@ Na **Monitoria** (fila de avaliação, com a meta do dia), *Avaliar* abre a tela
 
 O **Script de vendas** fica numa página própria, para consulta. O administrador cria uma nova versão, edita blocos, itens, pesos, itens críticos e o valor da divergência, e publica. A avaliação guarda a versão com que foi feita, então mudar o script não altera as notas antigas.
 
-O resultado vira o resultado oficial da ligação e entra na comparação com a tabulação do operador na hora. A monitora pode **corrigir** uma avaliação; a ligação guarda quem avaliou e quando. Supervisores e o perfil só leitura veem o resultado, mas não registram.
+O resultado vira o resultado oficial da ligação e entra na comparação com a tabulação do operador na hora.
+
+### Supervisão
+
+A página **Supervisão** mostra o levantamento da monitoria:
+- nota média, % de avaliações com falha crítica e avaliações aguardando ciência;
+- nota média por semana;
+- trechos do script mais errados (e com divergência);
+- operadores, da menor nota para a maior;
+- a lista de avaliações com o feedback.
+
+Ao abrir uma avaliação, o supervisor ouve os trechos marcados, lê as observações e o feedback e registra a **ciência**, com a devolutiva dada ao operador. O operador não acessa o sistema: o feedback chega a ele pelo supervisor. Se a monitora reabrir a avaliação, a ciência volta a ficar pendente (a anterior fica no histórico). Tudo exporta em CSV.
+
+> [!IMPORTANT]
+> **Cada supervisor vê só a própria equipe.** O administrador vincula as equipes (o grupo do Argus de cada ligação) em *Usuários → Equipes dos supervisores*. O filtro vale para tudo o que o supervisor acessa: ligações, áudio, painéis, exportações, avaliações e ciência. Supervisor sem equipe vinculada não vê nada. Admin, monitora e só leitura veem todas as equipes. A monitora pode **corrigir** uma avaliação; a ligação guarda quem avaliou e quando. Supervisores e o perfil só leitura veem o resultado, mas não registram.
 
 | Status | Significado |
 |---|---|
@@ -460,6 +474,9 @@ Use o botão **Testar** da tela para conferir o envio.
 | `GET` | `/api/v1/scripts/ativo` · `/api/v1/scripts/versoes` | Script em uso e versões |
 | `POST` / `PUT` | `/api/v1/scripts/versoes` · `/{id}` · `/{id}/publicar` | Nova versão, edição do rascunho e publicação (admin) |
 | `GET` / `PUT` | `/api/v1/parametros` | Meta diária de avaliações (admin edita) |
+| `GET` | `/api/v1/supervisao/resumo` · `/avaliacoes` · `/exportar` | Levantamento, lista e CSV das avaliações (só as equipes do supervisor) |
+| `POST` | `/api/v1/avaliacoes/{id}/ciencia` | Supervisor registra a ciência e a devolutiva |
+| `GET` / `PUT` | `/api/v1/equipes` · `/api/v1/usuarios/{id}/grupos` | Equipes conhecidas e vínculo dos supervisores (admin) |
 | `GET` | `/api/v1/alertas` | Alertas abertos, resolvidos, regras e canais |
 | `POST` | `/api/v1/alertas/avaliar` | Avalia as regras agora |
 | `POST` | `/api/v1/alertas/{id}/reconhecer` | Marca quem está cuidando do alerta |
@@ -560,8 +577,9 @@ cd frontend && npm run lint && npm run build
   - Fila da monitoria, *não avaliável* com motivo, migração automática do banco antigo.
 - [x] **Monitoria humana, fase 2.**
   - Script de vendas versionado (transcrito do PDF) e avaliação item a item com marcações no áudio, nota e falha crítica.
+- [x] **Monitoria humana, fase 3.**
+  - Supervisão por equipe (só a própria), levantamento, ciência com devolutiva e exportação.
 - [ ] **Monitoria humana, próximas fases.**
-  - Supervisor vê a avaliação e o feedback da própria equipe e dá ciência.
   - Controle de ponto (atrasos, pausas, almoço) no lugar da planilha.
   - Painel integrado de monitoria, ponto e alertas.
 

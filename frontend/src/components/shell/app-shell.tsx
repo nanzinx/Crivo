@@ -18,8 +18,9 @@ const NAV = [
   { href: "/", label: "Visão geral", short: "Visão", icon: LayoutDashboard },
   { href: "/ligacoes", label: "Ligações", short: "Ligações", icon: ListMusic },
   { href: "/monitoria", label: "Monitoria", short: "Monitoria", icon: ClipboardCheck },
+  { href: "/supervisao", label: "Supervisão", short: "Supervisão", icon: Users },
   { href: "/script", label: "Script de vendas", short: "Script", icon: ScrollText, soDesktop: true },
-  { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks },
+  { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks, soDesktop: true },
   { href: "/alertas", label: "Alertas e relatórios", short: "Alertas", icon: BellRing },
   { href: "/saude", label: "Saúde do sistema", short: "Saúde", icon: Activity },
 ];

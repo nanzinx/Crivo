@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Avaliacao, Call, Parametro, ScriptVersao, agora
-from ..services import avaliacoes, script
-from .auth import exigir_papel
+from ..services import avaliacoes, equipes, script, supervisao
+from .auth import escopo_equipe, exigir_papel
 
 router = APIRouter(prefix="/api/v1", tags=["avaliacoes"])
 monitoria = exigir_papel("monitora", "admin", mensagem="Só a monitoria de qualidade avalia ligações.")
@@ -28,9 +28,10 @@ def _erro(e: Exception):
     raise HTTPException(409, str(e))
 
 
-def _avaliacao(db: Session, aid: int) -> Avaliacao:
+def _avaliacao(db: Session, aid: int, grupos: list[str] | None = None) -> Avaliacao:
     a = db.get(Avaliacao, aid)
-    if not a:
+    c = db.get(Call, a.call_id) if a else None
+    if not a or not c or not equipes.no_escopo(c, grupos):
         raise HTTPException(404, "Avaliação não encontrada")
     return a
 
@@ -164,9 +165,11 @@ def salvar_parametros(dados: dict[str, str], db: Session = Depends(get_db), _u=D
 # --------------------------------------------------------------------------- fila e avaliação
 @router.get("/avaliacoes/fila")
 def fila(request: Request, operador: str | None = None, data_inicio: date | None = None, data_fim: date | None = None,
-         page: int = 1, page_size: int = 30, db: Session = Depends(get_db)):
+         page: int = 1, page_size: int = 30, db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
     """Ligações com gravação esperando a monitoria (e rascunhos em andamento), mais antigas primeiro."""
     stmt = select(Call).where(Call.status.in_((avaliacoes.PENDENTE_AVALIACAO, avaliacoes.EM_AVALIACAO)))
+    if grupos is not None:
+        stmt = stmt.where(equipes.filtro(grupos))
     if operador:
         stmt = stmt.where(Call.operador_nome == operador)
     if data_inicio:
@@ -191,7 +194,7 @@ def fila(request: Request, operador: str | None = None, data_inicio: date | None
         itens.append({
             "id": c.id, "id_ligacao": c.id_ligacao, "data_ligacao": c.data_ligacao.isoformat() if c.data_ligacao else None,
             "duracao_segundos": c.duracao_segundos, "operador_nome": c.operador_nome,
-            "tabulacao_operador": c.tabulacao_operador, "grupo": c.tipo_agente or c.grupo_origem, "status": c.status,
+            "tabulacao_operador": c.tabulacao_operador, "grupo": c.grupo_origem, "status": c.status,
             "tem_audio": bool(c.caminho_audio),
             "rascunho": {"monitora": a.monitora_nome, "trava": a.trava_nome if avaliacoes.trava_ativa(a) else None,
                          "minha": avaliacoes.trava_ativa(a) and avaliacoes.e_minha(a, u)} if a else None,
@@ -215,8 +218,11 @@ def iniciar(call_id: int, request: Request, db: Session = Depends(get_db), _u=De
 
 
 @router.get("/avaliacoes/{aid}")
-def ler(aid: int, request: Request, db: Session = Depends(get_db)):
-    return avaliacoes.serializar_completa(db, _avaliacao(db, aid), _usuario(request))
+def ler(aid: int, request: Request, db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
+    a = _avaliacao(db, aid, grupos)
+    d = avaliacoes.serializar_completa(db, a, _usuario(request))
+    d["ciencia"] = supervisao.serializar_ciencia(supervisao.ciencias(db, [a.id]).get(a.id))
+    return d
 
 
 class ItemAvIn(BaseModel):

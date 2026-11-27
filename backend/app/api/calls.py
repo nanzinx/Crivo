@@ -13,7 +13,8 @@ from ..database import get_db
 from ..models import Avaliacao, Call, Tabulacao
 from ..services import avaliacoes, tabulacoes
 from ..taxonomy import CATEGORIES, label_cat, label_sub, valid
-from .auth import exigir_papel
+from ..services import equipes
+from .auth import escopo_equipe, exigir_papel
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
 
@@ -38,7 +39,10 @@ def apply_filters(
     revisado: bool | None = None,
     gravidade: str | None = None,
     nao_ligar: bool | None = None,
+    grupos: list[str] | None = None,
 ):
+    if grupos is not None:  # supervisor: só as equipes dele (lista vazia = nada)
+        stmt = stmt.where(equipes.filtro(grupos))
     if data_inicio:
         stmt = stmt.where(Call.data_ligacao >= datetime.combine(data_inicio, time.min))
     if data_fim:
@@ -176,8 +180,12 @@ class Filtros:
         nao_ligar: bool | None = None,
         q: str | None = None,
         status: str | None = None,
+        grupos: list[str] | None = Depends(escopo_equipe),
     ):
-        self.kw = dict(data_inicio=data_inicio, data_fim=data_fim, categoria=categoria, subcategoria=subcategoria,
+        if not isinstance(grupos, (list, type(None))):  # chamado fora do FastAPI (ex.: relatório diário): sem escopo
+            grupos = None
+        self.grupos = grupos
+        self.kw = dict(grupos=grupos, data_inicio=data_inicio, data_fim=data_fim, categoria=categoria, subcategoria=subcategoria,
                        telefone=telefone, operador=operador, campanha=campanha, q=q, status=status, tronco=tronco,
                        tipo_agente=tipo_agente, tipo_discagem=tipo_discagem, desligado_por=desligado_por,
                        divergencia=divergencia, revisao=revisao,
@@ -268,12 +276,17 @@ def _detalhe(db: Session, c: Call) -> dict:
     return out
 
 
-@router.get("/calls/{call_id}")
-def get_call(call_id: int, db: Session = Depends(get_db)):
+def call_visivel(db: Session, call_id: int, grupos: list[str] | None) -> Call:
+    """A ligação, se existir e for de uma equipe que o usuário pode ver (senão, 404: nem confirma que existe)."""
     c = db.get(Call, call_id)
-    if not c:
+    if not c or not equipes.no_escopo(c, grupos):
         raise HTTPException(404, "Ligação não encontrada")
-    return _detalhe(db, c)
+    return c
+
+
+@router.get("/calls/{call_id}")
+def get_call(call_id: int, db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
+    return _detalhe(db, call_visivel(db, call_id, grupos))
 
 
 class ResultadoIn(BaseModel):
@@ -313,9 +326,9 @@ def registrar_resultado(call_id: int, r: ResultadoIn, request: Request, db: Sess
 
 
 @router.get("/calls/{call_id}/audio")
-def get_audio(call_id: int, db: Session = Depends(get_db)):
-    c = db.get(Call, call_id)
-    if not c or not c.caminho_audio or not Path(c.caminho_audio).exists():
+def get_audio(call_id: int, db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
+    c = call_visivel(db, call_id, grupos)
+    if not c.caminho_audio or not Path(c.caminho_audio).exists():
         raise HTTPException(404, "Áudio indisponível")
     media = "audio/wav" if c.caminho_audio.lower().endswith(".wav") else "audio/mpeg"
     return FileResponse(c.caminho_audio, media_type=media)
@@ -335,17 +348,20 @@ def available_dates(db: Session = Depends(get_db)):
     return [{"data": str(r[0]), "total": r[1]} for r in rows if r[0]]
 
 
-def _distintos(db: Session, col) -> list[dict]:
-    rows = db.execute(select(col, func.count(Call.id)).where(col.is_not(None)).group_by(col)
-                      .order_by(func.count(Call.id).desc())).all()
+def _distintos(db: Session, col, grupos: list[str] | None = None) -> list[dict]:
+    stmt = select(col, func.count(Call.id)).where(col.is_not(None))
+    if grupos is not None:
+        stmt = stmt.where(equipes.filtro(grupos))
+    rows = db.execute(stmt.group_by(col).order_by(func.count(Call.id).desc())).all()
     return [{"nome": r[0], "total": r[1]} for r in rows if r[0] not in (None, "")]
 
 
 @router.get("/analyst/filters-options")
-def analyst_filter_options(db: Session = Depends(get_db)):
-    """Opções reais (vindas do banco) para os filtros da interface."""
+def analyst_filter_options(db: Session = Depends(get_db), grupos=Depends(escopo_equipe)):
+    """Opções reais (vindas do banco) para os filtros da interface (supervisor: só das equipes dele)."""
     return {
-        "operadores": _distintos(db, Call.operador_nome),
+        "operadores": _distintos(db, Call.operador_nome, grupos),
+        "grupos": _distintos(db, Call.grupo_origem, grupos),
         "troncos": _distintos(db, Call.tronco),
         "campanhas": _distintos(db, Call.id_campanha),
         "tipos_agente": [r["nome"] for r in _distintos(db, Call.tipo_agente)],

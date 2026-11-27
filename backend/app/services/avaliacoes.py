@@ -323,6 +323,12 @@ def reabrir(db: Session, a: Avaliacao, usuario: Usuario | None, motivo: str) -> 
     antes = {"status": a.status, "nota": a.nota, "falha_critica": a.falha_critica, "categoria": a.categoria,
              "subcategoria": a.subcategoria, "monitora": a.monitora_nome,
              "finalizada_em": a.finalizada_em.isoformat() if a.finalizada_em else None}
+    from ..models import AvaliacaoCiencia
+
+    ci = db.scalars(select(AvaliacaoCiencia).where(AvaliacaoCiencia.avaliacao_id == a.id)).first()
+    if ci:  # a avaliação vai mudar: o supervisor precisa ver de novo
+        antes["ciencia"] = {"por": ci.usuario_nome, "em": ci.em.isoformat(), "devolutiva": ci.devolutiva}
+        db.delete(ci)
     a.status, a.finalizada_em = "rascunho", None
     a.trava_usuario_id = a.trava_nome = a.trava_ate = None
     if a.script_versao_id is None and (v := script.ativo(db)):

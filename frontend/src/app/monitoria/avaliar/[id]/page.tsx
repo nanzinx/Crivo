@@ -50,8 +50,8 @@ export default function AvaliarPage() {
 
   return (
     <div className="space-y-4">
-      <Link href="/monitoria" className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-ink">
-        <ArrowLeft className="h-3.5 w-3.5" /> Fila de avaliação
+      <Link href={podeAvaliar ? "/monitoria" : "/supervisao"} className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-ink">
+        <ArrowLeft className="h-3.5 w-3.5" /> {podeAvaliar ? "Fila de avaliação" : "Supervisão"}
       </Link>
       {error ? (
         <Card>

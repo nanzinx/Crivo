@@ -52,6 +52,13 @@ def exigir_papel(*papeis: str, mensagem: str | None = None):
 exigir_admin = exigir_papel("admin", mensagem="Só administradores gerenciam usuários.")
 
 
+def escopo_equipe(request: Request, db: Session = Depends(get_db), _u=Depends(exigir_login)) -> list[str] | None:
+    """Dependência: equipes visíveis para quem está logado (None = todas). Ver services/equipes."""
+    from ..services import equipes
+
+    return equipes.escopo(db, getattr(request.state, "usuario", None))
+
+
 def nome_do_usuario(request: Request) -> str | None:
     u = getattr(request.state, "usuario", None)
     return u.nome if u else None

@@ -318,3 +318,28 @@ class Sessao(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
     criada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     expira_em: Mapped[datetime] = mapped_column(DateTime)
+
+
+class SupervisorGrupo(Base):
+    """Equipes (grupo do Argus, `calls.grupo_origem`) que cada supervisor acompanha. Supervisor só vê as suas."""
+
+    __tablename__ = "supervisor_grupos"
+    __table_args__ = (UniqueConstraint("usuario_id", "grupo", name="uq_supervisor_grupo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    grupo: Mapped[str] = mapped_column(String(128))
+
+
+class AvaliacaoCiencia(Base):
+    """O supervisor tomou ciência da avaliação e registrou a devolutiva dada ao operador (P3: o feedback
+    chega ao operador pelo supervisor)."""
+
+    __tablename__ = "avaliacao_ciencias"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), unique=True, index=True)
+    usuario_id: Mapped[int | None] = mapped_column(Integer)
+    usuario_nome: Mapped[str] = mapped_column(String(80))
+    em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+    devolutiva: Mapped[str | None] = mapped_column(Text)

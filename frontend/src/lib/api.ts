@@ -94,6 +94,7 @@ export type AvaliacaoCompleta = Avaliacao & {
   marcas: Marca[];
   eventos: { em: string; usuario: string | null; acao: string; detalhe: Record<string, unknown> | null }[];
   calculo: Calculo | null;
+  ciencia?: Ciencia | null;
   trava: { nome: string | null; ate: string | null; ativa: boolean; minha: boolean };
   desfechos: Record<Desfecho, string>;
 };
@@ -120,6 +121,40 @@ export type FilaItem = {
   tem_audio: boolean;
   rascunho: { monitora: string | null; trava: string | null; minha: boolean } | null;
 };
+export type Ciencia = { por: string; em: string; devolutiva: string | null };
+export type SupervisaoFiltros = { data_inicio?: string; data_fim?: string; grupo?: string; operador?: string };
+export type SupervisaoResumo = {
+  avaliacoes: number;
+  nota_media: number | null;
+  falhas_criticas: number;
+  falha_critica_pct: number;
+  sem_ciencia: number;
+  operadores: { operador: string; grupo: string | null; avaliacoes: number; nota_media: number | null; falhas_criticas: number; sem_ciencia: number; ultima: string | null }[];
+  evolucao: { semana: string; avaliacoes: number; nota_media: number | null; falhas_criticas: number }[];
+  itens: { texto: string; secao: string; critico: boolean; avaliados: number; acertou: number; errou: number; divergencia: number; erro_pct: number; divergencia_pct: number }[];
+  escopo: { restrito: boolean; grupos: string[] | null };
+};
+export type SupervisaoLinha = {
+  id: number;
+  call_id: number;
+  id_ligacao: number | null;
+  data_ligacao: string | null;
+  operador_nome: string | null;
+  grupo: string | null;
+  tabulacao_operador: string | null;
+  monitora_nome: string | null;
+  finalizada_em: string | null;
+  nota: number | null;
+  falha_critica: boolean;
+  desfecho: Desfecho | null;
+  categoria: string | null;
+  divergencia_tabulacao: boolean;
+  observacao: string | null;
+  feedback_fortes: string | null;
+  feedback_melhorar: string | null;
+  ciencia: Ciencia | null;
+};
+export type Equipes = { grupos: { nome: string; ligacoes: number }[]; supervisores: { id: number; nome: string; ativo: boolean; grupos: string[] }[] };
 export type Fila = { total: number; page: number; page_size: number; itens: FilaItem[]; meta: { diaria: number; feitas_hoje: number } };
 
 export type Call = {
@@ -215,6 +250,7 @@ export type Taxonomy = Record<string, { label: string; desc: string; subs: Recor
 
 export type FilterOptions = {
   operadores: { nome: string; total: number }[];
+  grupos?: { nome: string; total: number }[];
   troncos: { nome: string; total: number }[];
   campanhas: { nome: number; total: number }[];
   tipos_agente: string[];
@@ -450,6 +486,12 @@ export const api = {
   naoAvaliavel: (id: number, motivo: string) => enviarJson<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}/nao-avaliavel`, "POST", { motivo }),
   reabrirAvaliacao: (id: number, motivo: string) => enviarJson<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}/reabrir`, "POST", { motivo }),
   liberarAvaliacao: (id: number, forcar = false) => enviarJson<{ ok: boolean }>(`/api/v1/avaliacoes/${id}/trava?forcar=${forcar}`, "DELETE", {}),
+  supervisaoResumo: (f: SupervisaoFiltros) => get<SupervisaoResumo>("/api/v1/supervisao/resumo", f),
+  supervisaoAvaliacoes: (f: SupervisaoFiltros & { ciencia?: string; falha_critica?: string; page?: number }) =>
+    get<{ total: number; page: number; page_size: number; itens: SupervisaoLinha[] }>("/api/v1/supervisao/avaliacoes", f),
+  darCiencia: (id: number, devolutiva: string) => enviarJson<Ciencia>(`/api/v1/avaliacoes/${id}/ciencia`, "POST", { devolutiva }),
+  equipes: () => get<Equipes>("/api/v1/equipes"),
+  definirGrupos: (uid: number, grupos: string[]) => enviarJson<{ id: number; grupos: string[] }>(`/api/v1/usuarios/${uid}/grupos`, "PUT", { grupos }),
   registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
@@ -487,4 +529,5 @@ export const api = {
 export const audioUrl = (id: number) => `/api/v1/calls/${id}/audio`;
 export const relatorioHtmlUrl = (id: number) => `/api/v1/relatorios/${id}/html`;
 export const exportTabulacoesUrl = "/api/v1/tabulacoes/exportar";
+export const exportSupervisaoUrl = (f: SupervisaoFiltros) => `/api/v1/supervisao/exportar${qs(f)}`;
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;

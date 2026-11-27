@@ -16,14 +16,16 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, inspect, select, text, update
 
 from app.database import SessionLocal, init_db
-from app.models import Avaliacao, Call, ContactIdentity
-from app.services import avaliacoes, pipeline, status
+from app.models import (Avaliacao, AvaliacaoCiencia, AvaliacaoEvento, AvaliacaoItem, AvaliacaoMarca, Call,
+                        ContactIdentity)
+from app.services import avaliacoes, pipeline, script, status
 
 OPERADORES = ["Ana Lima", "Bruno Costa", "Carla Dias", "Diego Rocha", "Elisa Prado", "Fábio Nunes",
               "Gabi Torres", "Hugo Melo", "Íris Campos", "João Reis"]
 TRONCOS = ["4NET - PRINCIPAL", "VENDITORE - URA", "TELECOM X - BACKUP"]
 GRUPOS = ["EQUIPE COMERCIAL A", "EQUIPE COMERCIAL B", "EQUIPE DIGITAL"]
 MONITORAS = ["Monitora Paula", "Monitora Renata"]
+SUPERVISORES = ["Supervisora Ana", "Supervisor Bruno"]
 NOMES = ["Maria Souza", "José Almeida", "Antônia Ferreira", "Francisco Gomes", "Luzia Martins",
          "Raimundo Barbosa", "Rita Cardoso", "Sebastião Ribeiro", "Tereza Moura", "Valdir Pinto"]
 
@@ -83,13 +85,16 @@ def gerar(n: int, seed: int = 42) -> int:
     pesos = [c[2] for c in CENARIOS]
     # cada operador tem uma "propensão a errar" diferente, para o ranking ficar interessante
     erro_op = {op: rng.uniform(0.03, 0.35) for op in OPERADORES}
+    equipe_op = {op: GRUPOS[i % len(GRUPOS)] for i, op in enumerate(OPERADORES)}  # cada operador numa equipe
     base_id = 900_000_000
     with SessionLocal() as db:
+        v = script.ativo(db)
+        roteiro = [(i, sec) for sec, itens in script.secoes_e_itens(db, v.id) for i in itens] if v else []
         for i in range(n):
             cat, sub, _, tab_ok, falas = rng.choices(CENARIOS, weights=pesos)[0]
             op = rng.choice(OPERADORES)
             nome = rng.choice(NOMES)
-            grupo = rng.choice(GRUPOS)
+            grupo = equipe_op[op]
             tronco = rng.choices(TRONCOS, weights=[6, 3, 1])[0]
             if tronco.startswith("TELECOM") and rng.random() < 0.5:  # tronco "ruim": mais ligações mudas
                 cat, sub, tab_ok, falas = "LIGACAO_MUDA", "MUDO_TOTAL", "LIGAÇÃO MUDA / CAIXA POSTAL", []
@@ -131,9 +136,43 @@ def gerar(n: int, seed: int = 42) -> int:
                     motivo="Áudio cortado no meio da conversa (demonstração).", monitora_nome=rng.choice(MONITORAS))
                 a.iniciada_em = c.data_ligacao + timedelta(hours=rng.randint(1, 20))
                 a.finalizada_em = a.atualizado_em = a.iniciada_em + timedelta(minutes=rng.randint(2, 9))
+                if st == "avaliada" and cat in ("EM_NEGOCIACAO", "SEM_INTERESSE") and roteiro:
+                    _avaliar_script(db, rng, a, roteiro, "venda" if sub == "ACEITE_VERBAL" else "recusa"
+                                    if cat == "SEM_INTERESSE" else "outro", erro_op[op], dia < hoje - timedelta(days=3))
         db.commit()
     status.registrar(status.IMPORTACAO, True, f"{n} ligações de demonstração")
     return n
+
+
+FEEDBACKS = [("Boa abertura, tom de voz seguro", "Explicar a portabilidade com o exemplo do celular"),
+             ("Apresentou bem a proposta", "Confirmar a conta antes de encerrar"),
+             ("Tratou a objeção com calma", "Perguntar o que impede de fechar hoje"),
+             ("Seguiu o script do início ao fim", "Reforçar que a parcela continua igual")]
+
+
+def _avaliar_script(db, rng, a, roteiro, desfecho, taxa_erro, com_ciencia):
+    """Avaliação de script fictícia: operadores com mais erro de tabulação também erram mais o script."""
+    a.script_versao_id, a.desfecho = roteiro[0][1].versao_id, desfecho
+    for item, sec in roteiro:
+        if not avaliacoes.secao_aplica(sec.aplicabilidade, desfecho):
+            continue
+        r = rng.random()
+        estado = ("errou" if r < taxa_erro * 0.8 else "divergencia" if r < taxa_erro * 1.3
+                  else "nao_se_aplica" if r < taxa_erro * 1.3 + 0.03 else "acertou")
+        if item.critico and estado == "errou" and rng.random() < 0.6:
+            estado = "acertou"  # falha crítica é rara
+        db.add(AvaliacaoItem(avaliacao_id=a.id, item_id=item.id, estado=estado,
+                             comentario="Falou diferente do script (demonstração)." if estado in ("errou", "divergencia") else None))
+        if estado != "acertou" or rng.random() < 0.15:
+            db.add(AvaliacaoMarca(avaliacao_id=a.id, item_id=item.id, tipo=estado if estado != "nao_se_aplica" else "nota",
+                                  segundos=round(rng.uniform(2, 200), 1)))
+    db.flush()
+    calc = avaliacoes.calcular(db, a)
+    a.nota, a.falha_critica = calc["nota"], calc["falha_critica"]
+    a.feedback_fortes, a.feedback_melhorar = rng.choice(FEEDBACKS)
+    if com_ciencia and rng.random() < 0.7:
+        db.add(AvaliacaoCiencia(avaliacao_id=a.id, usuario_nome=rng.choice(SUPERVISORES),
+                                em=a.finalizada_em + timedelta(days=1), devolutiva="Conversado no 1:1 (demonstração)."))
 
 
 def limpar() -> int:
@@ -141,6 +180,10 @@ def limpar() -> int:
         demo = select(Call.id).where(Call.origem == "demo")
         if inspect(db.bind).has_table("ia_uso"):  # banco da versão anterior, com IA
             db.execute(text("DELETE FROM ia_uso WHERE call_id IN (SELECT id FROM calls WHERE origem = 'demo')"))
+        avs = select(Avaliacao.id).where(Avaliacao.call_id.in_(demo))
+        for t in (AvaliacaoItem, AvaliacaoMarca, AvaliacaoEvento, AvaliacaoCiencia):
+            db.execute(delete(t).where(t.avaliacao_id.in_(avs)))
+        db.execute(update(Call).where(Call.origem == "demo").values(avaliacao_id=None))
         db.execute(delete(Avaliacao).where(Avaliacao.call_id.in_(demo)))
         db.execute(delete(ContactIdentity).where(ContactIdentity.id_call_evidencia.in_(demo)))
         db.execute(update(Call).where(Call.ligacao_referencia_id.in_(demo)).values(ligacao_referencia_id=None))

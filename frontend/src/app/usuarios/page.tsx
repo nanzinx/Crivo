@@ -121,7 +121,7 @@ export default function UsuariosPage() {
         </ul>
       </Card>
 
-      <Card title="Equipe" subtitle={data ? `${data.length} usuário(s)` : undefined}>
+      <Card title="Usuários" subtitle={data ? `${data.length} usuário(s)` : undefined}>
         {isLoading || !data ? (
           <Skeleton className="h-40" />
         ) : (
@@ -132,7 +132,59 @@ export default function UsuariosPage() {
           </ul>
         )}
       </Card>
+
+      <EquipesCard />
     </div>
+  );
+}
+
+function EquipesCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["equipes"], queryFn: api.equipes });
+  const salvar = useMutation({
+    mutationFn: ({ id, grupos }: { id: number; grupos: string[] }) => api.definirGrupos(id, grupos),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["equipes"] }),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  if (!data) return <Skeleton className="h-32" />;
+  return (
+    <Card title="Equipes dos supervisores" subtitle="Cada supervisor vê só as ligações, avaliações e feedbacks das equipes marcadas">
+      {!data.supervisores.length ? (
+        <p className="text-sm text-ink-muted">Nenhum supervisor cadastrado.</p>
+      ) : !data.grupos.length ? (
+        <p className="text-sm text-ink-muted">Nenhuma equipe conhecida ainda: elas vêm do relatório da discadora (grupo do Argus).</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {data.supervisores.map((sup) => (
+            <li key={sup.id} className={cn("py-3", !sup.ativo && "opacity-60")}>
+              <p className="mb-1.5 flex items-center gap-2 text-sm font-medium">
+                {sup.nome} {!sup.grupos.length && <Pill tone="warn">sem equipe: não vê nada</Pill>}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.grupos.map((g) => {
+                  const marcado = sup.grupos.includes(g.nome);
+                  return (
+                    <button
+                      key={g.nome}
+                      aria-pressed={marcado}
+                      onClick={() =>
+                        salvar.mutate({ id: sup.id, grupos: marcado ? sup.grupos.filter((x) => x !== g.nome) : [...sup.grupos, g.nome] })
+                      }
+                      className={cn(
+                        "rounded-lg border px-2.5 py-1 text-xs transition",
+                        marcado ? "border-brand bg-brand-soft font-medium text-brand-ink" : "border-line text-ink-muted hover:text-ink",
+                      )}
+                    >
+                      {g.nome}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
