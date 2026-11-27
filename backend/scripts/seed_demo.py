@@ -200,7 +200,7 @@ def _ponto_demo(db, rng, hoje):
         pausas_csv = ['" ";"Grupo Operacional";"Operador";"Descrição da Pausa";"Inicio";"Fim";"Tempo"']
         for op in OPERADORES:
             g = equipe_op[op]
-            base = (14 * 60 if "DIGITAL" in g and OPERADORES.index(op) % 2 else 10 * 60) if "DIGITAL" in g else 10 * 60
+            base = (14 * 60 if OPERADORES.index(op) % 2 else 8 * 60 + 30) if "DIGITAL" in g else 10 * 60  # turnos da equipe
             ent = base + (rng.randint(12, 35) if atrasa[op] and rng.random() < 0.6 else rng.randint(-9, 6))
             sai = ent + 7 * 60 + rng.randint(-5, 10)
             fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"  # noqa: E731
