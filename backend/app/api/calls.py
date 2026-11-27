@@ -1,22 +1,28 @@
 import csv
 import io
+import logging
+import os
+import tempfile
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, model_validator
 from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
-from ..models import Avaliacao, Call, Tabulacao
-from ..services import avaliacoes, tabulacoes
+from ..models import Avaliacao, Call, Tabulacao, agora
+from ..services import avaliacoes, exportar_zip, tabulacoes
 from ..taxonomy import CATEGORIES, label_cat, label_sub, valid
 from ..services import equipes
 from .auth import escopo_equipe, exigir_papel
 
 router = APIRouter(prefix="/api/v1", tags=["calls"])
+log = logging.getLogger("calls")
 
 
 def apply_filters(
@@ -274,6 +280,41 @@ def _detalhe(db: Session, c: Call) -> dict:
     if c.ligacao_referencia_id and (ref := db.get(Call, c.ligacao_referencia_id)):
         out["ligacao_referencia"] = serialize(ref)
     return out
+
+
+@router.get("/calls/gravacoes.zip")
+def baixar_gravacoes(request: Request, f: Filtros = Depends(), ids: str | None = None, db: Session = Depends(get_db),
+                     _u=Depends(exigir_papel("monitora", "admin", "supervisor",
+                                             mensagem="O perfil só leitura não baixa gravações."))):
+    """Gravações filtradas (ou `ids=1,2,3`) num .zip: Equipe / Operador / Cliente / Tabulação."""
+    stmt = f(select(Call))
+    if ids:
+        try:
+            lista = [int(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(422, "ids deve ser uma lista de números separados por vírgula.")
+        stmt = stmt.where(Call.id.in_(lista))
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    if total == 0:
+        raise HTTPException(404, "Nenhuma ligação com esses filtros.")
+    if total > settings.zip_max_gravacoes:
+        raise HTTPException(413, f"{total} ligações: o limite por arquivo é {settings.zip_max_gravacoes}. "
+                                 "Diminua o período ou filtre por equipe/operador.")
+    calls = db.scalars(stmt.order_by(Call.grupo_origem, Call.operador_nome, Call.data_ligacao)).all()
+    tmp = tempfile.NamedTemporaryFile(prefix="crivo_", suffix=".zip", delete=False)
+    try:
+        with tmp:
+            r = exportar_zip.gerar(tmp, calls, _avaliacoes_de(db, calls))
+    except Exception:
+        os.unlink(tmp.name)
+        raise
+    u = getattr(request.state, "usuario", None)
+    log.info("zip de gravações: %s incluídas, %s sem áudio, por %s", r["incluidas"], r["sem_audio"],
+             u.email if u else "acesso local")
+    nome = f"gravacoes_{agora().strftime('%Y-%m-%d_%H%M')}.zip"
+    return FileResponse(tmp.name, media_type="application/zip", filename=nome,
+                        headers={"X-Gravacoes-Incluidas": str(r["incluidas"]), "X-Gravacoes-Sem-Audio": str(r["sem_audio"])},
+                        background=BackgroundTask(os.unlink, tmp.name))
 
 
 def call_visivel(db: Session, call_id: int, grupos: list[str] | None) -> Call:

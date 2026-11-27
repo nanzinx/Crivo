@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     recordings_dir: str = str(DATA / "gravacoes")
+    zip_max_gravacoes: int = 1000  # limite de gravações por arquivo .zip exportado
     legacy_csv: str = str(DATA / "relatorio_escuta_gravacoes.csv")
     legacy_html: str = str(DATA / "dashboard_gravacoes.html")
     cruzar_csv: str = str(DATA / "cruzar_dados.csv")

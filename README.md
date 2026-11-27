@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-128%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-133%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -264,6 +264,7 @@ Tudo fica no arquivo **`.env` na raiz** do repositório (modelo em [`.env.exampl
 | `ARGUS_WEBHOOK_SECRET` | Segredo do webhook (`X-Webhook-Secret` ou `?secret=`) | — |
 | `DATABASE_URL` | SQLite ou `postgresql+psycopg://…` | `sqlite:///./data/crivo.db` |
 | `RECORDINGS_DIR` | Pasta com as gravações locais | `./data/gravacoes` |
+| `ZIP_MAX_GRAVACOES` | Máximo de gravações num .zip exportado | `1000` |
 | `CRUZAR_CSV` | Relatório detalhado da discadora | `./data/cruzar_dados.csv` |
 | `LEGACY_CSV` / `LEGACY_HTML` | Escuta manual anterior | `./data/…` |
 | `CORS_ORIGINS` | Origens liberadas no CORS | `http://localhost:3000,…` |
@@ -383,6 +384,19 @@ O **Script de vendas** fica numa página própria, para consulta. O administrado
 
 O resultado vira o resultado oficial da ligação e entra na comparação com a tabulação do operador na hora.
 
+### Baixar as gravações (.zip)
+
+Em **Ligações**, o botão **Baixar gravações (.zip)** junta as gravações da lista filtrada num único arquivo, pronto para mandar no BenHub. As pastas seguem esta ordem:
+
+```
+Equipe/Operador/Cliente/Tabulação/2026-11-20_170917_lig900000073.mp3
+```
+
+- Use os filtros da tela para escolher o que vai no arquivo: período, operador, resultado, só avaliadas etc.
+- Junto vai `lista_gravacoes.csv`, com o caminho de cada arquivo e os dados da ligação. As ligações sem gravação no servidor aparecem nela marcadas.
+- Limite de `ZIP_MAX_GRAVACOES` (1000) gravações por arquivo. Acima disso, filtre um período menor.
+- Monitora, administrador e supervisor (só a própria equipe) podem baixar. O perfil só leitura, não.
+
 ### Supervisão
 
 A página **Supervisão** mostra o levantamento da monitoria:
@@ -449,6 +463,7 @@ Use o botão **Testar** da tela para conferir o envio.
 | `GET` | `/api/v1/calls/{id}` | Detalhe com a avaliação da monitoria |
 | `GET` | `/api/v1/calls/{id}/audio` | Áudio da gravação |
 | `GET` | `/api/v1/calls/export` | CSV pronto para Excel (`;` + BOM) |
+| `GET` | `/api/v1/calls/gravacoes.zip` | Gravações filtradas (ou `ids=`) num .zip: Equipe / Operador / Cliente / Tabulação |
 | `GET` | `/api/v1/analytics/summary` | KPIs, categorias, matriz de contraste, ranking, distribuições |
 | `GET` | `/api/v1/analytics/timeline` | Volume diário por categoria |
 | `GET` | `/api/v1/analytics/horas` | Hora do dia × categoria |

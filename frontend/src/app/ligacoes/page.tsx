@@ -1,15 +1,17 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, Ear, ChevronLeft, ChevronRight, Download, ListMusic, PhoneIncoming, PhoneOutgoing } from "lucide-react";
+import { AlertTriangle, Ear, ChevronLeft, ChevronRight, Download, FileArchive, ListMusic, PhoneIncoming, PhoneOutgoing } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { CallDrawer, PlayButton } from "@/components/calls/call-drawer";
 import { FilterBar } from "@/components/filters/filter-bar";
 import { useFilters } from "@/components/filters/use-filters";
 import { Button, Card, CategoryBadge, Empty, GravidadePill, NaoLigarPill, Pill, Skeleton } from "@/components/ui/primitives";
-import { api, exportUrl, type Call } from "@/lib/api";
+import { toast } from "sonner";
+import { useAuth } from "@/components/auth-context";
+import { api, baixarGravacoesZip, exportUrl, type Call } from "@/lib/api";
 import { DESLIG_LABEL, STATUS_LABEL, cn, fmtDateTime, fmtDur, fmtInt, maskPhone } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
@@ -24,6 +26,20 @@ export default function Page() {
 
 function Ligacoes() {
   const { filters: f, page, setPage, query } = useFilters();
+  const { podeEditar } = useAuth();
+  const zip = useMutation({
+    mutationFn: () => {
+      toast(`Montando o .zip com ${fmtInt(data?.total ?? 0)} ligações…`, { id: "zip", duration: 60_000 });
+      return baixarGravacoesZip(f);
+    },
+    onSuccess: (r) =>
+      toast.success(`${fmtInt(r.incluidas)} gravações no .zip`, {
+        id: "zip",
+        duration: 8000,
+        description: r.semAudio ? `${fmtInt(r.semAudio)} ligações sem gravação no servidor (listadas em lista_gravacoes.csv)` : undefined,
+      }),
+    onError: (e) => toast.error((e as Error).message, { id: "zip", duration: 10_000 }),
+  });
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -74,11 +90,25 @@ function Ligacoes() {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Ligações</h1>
         </div>
-        <a href={exportUrl(f)} download>
-          <Button variant="primary" size="sm">
-            <Download className="h-4 w-4" /> Exportar CSV
-          </Button>
-        </a>
+        <div className="flex flex-wrap gap-2">
+          {podeEditar && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={zip.isPending}
+              disabled={!data?.total}
+              onClick={() => zip.mutate()}
+              title="Baixa as gravações filtradas em pastas: Equipe / Operador / Cliente / Tabulação"
+            >
+              <FileArchive className="h-4 w-4" /> Baixar gravações (.zip)
+            </Button>
+          )}
+          <a href={exportUrl(f)} download>
+            <Button variant="primary" size="sm">
+              <Download className="h-4 w-4" /> Exportar CSV
+            </Button>
+          </a>
+        </div>
       </header>
 
       <FilterBar showStatus />

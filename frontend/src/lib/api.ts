@@ -530,4 +530,21 @@ export const audioUrl = (id: number) => `/api/v1/calls/${id}/audio`;
 export const relatorioHtmlUrl = (id: number) => `/api/v1/relatorios/${id}/html`;
 export const exportTabulacoesUrl = "/api/v1/tabulacoes/exportar";
 export const exportSupervisaoUrl = (f: SupervisaoFiltros) => `/api/v1/supervisao/exportar${qs(f)}`;
+export const gravacoesZipUrl = (f: Filters) => `/api/v1/calls/gravacoes.zip${qs(f)}`;
+
+/** Baixa o .zip das gravações filtradas. Devolve quantas entraram e quantas ficaram sem áudio. */
+export async function baixarGravacoesZip(f: Filters) {
+  const r = await fetch(gravacoesZipUrl(f), { cache: "no-store" });
+  await verificar(r);
+  const blob = await r.blob();
+  const nome = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? "gravacoes.zip";
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: decodeURIComponent(nome) });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return { incluidas: Number(r.headers.get("x-gravacoes-incluidas") ?? 0), semAudio: Number(r.headers.get("x-gravacoes-sem-audio") ?? 0) };
+}
+
 export const exportUrl = (f: Filters) => `/api/v1/calls/export${qs(f)}`;
