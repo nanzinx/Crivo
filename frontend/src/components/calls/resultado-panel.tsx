@@ -2,11 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Ban, ClipboardCheck, Pencil, UserCheck } from "lucide-react";
+import { AlertOctagon, ArrowRight, Ban, ClipboardCheck, Pencil, UserCheck } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth-context";
-import { Button, CategoryBadge, NaoLigarPill } from "@/components/ui/primitives";
+import { Button, CategoryBadge, NaoLigarPill, Pill } from "@/components/ui/primitives";
 import { api, type Call, type ResultadoIn } from "@/lib/api";
 import { CATEGORIAS, catColor, catLabel, cn, fmtDateTime } from "@/lib/utils";
 
@@ -60,6 +61,23 @@ export function ResultadoPanel({ c }: { c: Call }) {
               {c.pediu_nao_ligar && <NaoLigarPill />}
             </p>
           )}
+          {c.avaliacao?.script_versao_id && (
+            <p className="flex flex-wrap items-center gap-1.5">
+              {c.avaliacao.nota != null && (
+                <span>
+                  Nota do script <b className="num font-semibold">{c.avaliacao.nota.toLocaleString("pt-BR")}</b>
+                </span>
+              )}
+              {c.avaliacao.falha_critica && (
+                <Pill tone="critical">
+                  <AlertOctagon className="h-3 w-3" /> falha crítica
+                </Pill>
+              )}
+              <Link href={`/monitoria/avaliar/${c.id}`} className="inline-flex items-center gap-0.5 font-medium text-brand-ink hover:underline">
+                Ver avaliação <ArrowRight className="h-3 w-3" />
+              </Link>
+            </p>
+          )}
         </div>
         {podeAvaliar && (
           <Button size="sm" variant="ghost" onClick={() => setEditando(true)} title="Corrigir o resultado">
@@ -73,9 +91,21 @@ export function ResultadoPanel({ c }: { c: Call }) {
   const podeSalvar = naoAvaliavel ? motivo.trim().length > 0 : Boolean(cat);
   return (
     <section className="space-y-3 rounded-2xl border border-line p-3">
+      {!editando && (
+        <Link
+          href={`/monitoria/avaliar/${c.id}`}
+          className="flex items-center justify-between gap-2 rounded-xl bg-brand-soft px-3 py-2.5 text-sm font-medium text-brand-ink transition hover:bg-brand/15"
+        >
+          <span>
+            {c.status === "em_avaliacao" ? "Continuar a avaliação do script" : "Avaliar com o script"}
+            <span className="block text-[11px] font-normal text-ink-2">Checklist item a item, marcações no áudio e nota</span>
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0" />
+        </Link>
+      )}
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-          <ClipboardCheck className="h-4 w-4 text-ink-muted" /> Resultado da ligação
+          <ClipboardCheck className="h-4 w-4 text-ink-muted" /> {editando ? "Corrigir o resultado" : "Ou só o resultado (registro rápido)"}
         </h3>
         <button
           type="button"

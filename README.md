@@ -16,7 +16,7 @@ uma visão clara do panorama das ligações, medir a qualidade da tabulação e 
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
   <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white" />
   <img alt="CI" src="https://github.com/nanzinx/crivo/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Testes" src="https://img.shields.io/badge/testes-105%20passando-0ca30c" />
+  <img alt="Testes" src="https://img.shields.io/badge/testes-122%20passando-0ca30c" />
 </p>
 
 <a href="#-começando">Começando</a> ·
@@ -365,6 +365,22 @@ Toda ligação com gravação entra na **fila da monitoria** (`/ligacoes?revisao
 - se quem atendeu pediu para não receber mais ligações;
 - ou **Não dá para avaliar**, com o motivo (áudio cortado, sem som, gravação trocada...).
 
+### Avaliação do script
+
+Na **Monitoria** (fila de avaliação, com a meta do dia), *Avaliar* abre a tela de avaliação da ligação:
+
+- **Player com linha do tempo.** Velocidade de 1× a 2×. Cada marcação vira um ponto colorido no áudio; clicar no ponto volta àquele momento.
+- **Checklist do script** (o *Script de vendas*, transcrito do PDF). Cada trecho é marcado como **acertou**, **errou**, **divergência** (falou diferente) ou **não se aplica**. Errou e divergência pedem comentário.
+- **Marcar agora.** Enquanto ouve, a monitora aperta *Acertou*, *Errou* ou *Diverg.* no momento em que o operador fala o trecho. O item é marcado e o momento fica gravado no áudio.
+- **Desfecho.** *Venda* inclui a efetivação; *Recusa* inclui o tratamento da recusa; *Sem conversa* não pontua o script.
+- **Nota em tempo real.** Soma dos pesos × valor (acertou 1, divergência 0,5, errou 0), dividida pelos pesos aplicáveis. *Não se aplica* e blocos fora do desfecho não contam. Errar um item **crítico** (documento, anuência, texto de confirmação) marca **falha crítica**, sem zerar a nota.
+- **Resultado da ligação, observação e feedback** (pontos fortes e a melhorar). O feedback chega ao operador pelo supervisor.
+- **Rascunho salvo sozinho e trava.** Só uma monitora avalia a ligação por vez. A trava vence em 15 minutos sem atividade.
+- **Reabrir.** Pede o motivo e guarda no histórico como a avaliação estava antes.
+- **Atalhos:** `espaço` toca/pausa, `←`/`→` 5 s, `j`/`k` muda de item, `1`–`4` marca o item, `m` cria um marcador.
+
+O **Script de vendas** fica numa página própria, para consulta. O administrador cria uma nova versão, edita blocos, itens, pesos, itens críticos e o valor da divergência, e publica. A avaliação guarda a versão com que foi feita, então mudar o script não altera as notas antigas.
+
 O resultado vira o resultado oficial da ligação e entra na comparação com a tabulação do operador na hora. A monitora pode **corrigir** uma avaliação; a ligação guarda quem avaliou e quando. Supervisores e o perfil só leitura veem o resultado, mas não registram.
 
 | Status | Significado |
@@ -435,7 +451,15 @@ Use o botão **Testar** da tela para conferir o envio.
 | `PUT` | `/api/v1/tabulacoes/{id}` | Confirma/corrige uma tabulação e recalcula as ligações |
 | `GET` | `/api/v1/tabulacoes/exportar` | Modelo em CSV |
 | `POST` | `/api/v1/tabulacoes/importar` | Importa o modelo de uma planilha CSV |
-| `POST` | `/api/v1/calls/{id}/resultado` | Registra (ou corrige) o resultado da ligação: monitora ou administrador |
+| `POST` | `/api/v1/calls/{id}/resultado` | Registro rápido do resultado da ligação: monitora ou administrador |
+| `GET` | `/api/v1/avaliacoes/fila` | Fila da monitoria, com a meta do dia |
+| `POST` | `/api/v1/calls/{id}/avaliacao` | Abre (ou retoma) a avaliação do script, com trava |
+| `GET` / `PUT` | `/api/v1/avaliacoes/{id}` | Lê / salva o rascunho (itens, marcadores, desfecho, feedback) |
+| `POST` | `/api/v1/avaliacoes/{id}/finalizar` · `/nao-avaliavel` · `/reabrir` | Conclui, marca como não avaliável, reabre com motivo |
+| `DELETE` | `/api/v1/avaliacoes/{id}/trava` | Libera a ligação para outra monitora |
+| `GET` | `/api/v1/scripts/ativo` · `/api/v1/scripts/versoes` | Script em uso e versões |
+| `POST` / `PUT` | `/api/v1/scripts/versoes` · `/{id}` · `/{id}/publicar` | Nova versão, edição do rascunho e publicação (admin) |
+| `GET` / `PUT` | `/api/v1/parametros` | Meta diária de avaliações (admin edita) |
 | `GET` | `/api/v1/alertas` | Alertas abertos, resolvidos, regras e canais |
 | `POST` | `/api/v1/alertas/avaliar` | Avalia as regras agora |
 | `POST` | `/api/v1/alertas/{id}/reconhecer` | Marca quem está cuidando do alerta |
@@ -534,8 +558,9 @@ cd frontend && npm run lint && npm run build
 - [x] **Monitoria humana, fase 1.**
   - Sai a IA: o resultado da ligação vem da monitora de qualidade (perfil próprio).
   - Fila da monitoria, *não avaliável* com motivo, migração automática do banco antigo.
+- [x] **Monitoria humana, fase 2.**
+  - Script de vendas versionado (transcrito do PDF) e avaliação item a item com marcações no áudio, nota e falha crítica.
 - [ ] **Monitoria humana, próximas fases.**
-  - Avaliação do script de vendas item a item (acertou, errou, divergência), com marcações no áudio e nota.
   - Supervisor vê a avaliação e o feedback da própria equipe e dá ciência.
   - Controle de ponto (atrasos, pausas, almoço) no lugar da planilha.
   - Painel integrado de monitoria, ponto e alertas.

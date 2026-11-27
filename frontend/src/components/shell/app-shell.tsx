@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, LogOut, Users } from "lucide-react";
 import { useAuth } from "@/components/auth-context";
-import { Activity, BellRing, LayoutDashboard, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
+import { Activity, BellRing, ClipboardCheck, LayoutDashboard, ScrollText, ListChecks, ListMusic, Moon, Sun, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Visão geral", short: "Visão", icon: LayoutDashboard },
   { href: "/ligacoes", label: "Ligações", short: "Ligações", icon: ListMusic },
+  { href: "/monitoria", label: "Monitoria", short: "Monitoria", icon: ClipboardCheck },
+  { href: "/script", label: "Script de vendas", short: "Script", icon: ScrollText, soDesktop: true },
   { href: "/tabulacoes", label: "Modelo de tabulação", short: "Tabulação", icon: ListChecks },
   { href: "/alertas", label: "Alertas e relatórios", short: "Alertas", icon: BellRing },
   { href: "/saude", label: "Saúde do sistema", short: "Saúde", icon: Activity },
@@ -281,7 +283,7 @@ function Chrome({ children }: { children: ReactNode }) {
 
       {/* Bottom nav (mobile/tablet) */}
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-        {NAV.map(({ href, short, icon: Icon }) => (
+        {NAV.filter((n) => !n.soDesktop).map(({ href, short, icon: Icon }) => (
           <Link
             key={href}
             href={href}

@@ -33,7 +33,94 @@ export type Avaliacao = {
   nao_avaliavel_motivo: string | null;
   iniciada_em: string | null;
   finalizada_em: string | null;
+  script_versao_id: number | null;
+  desfecho: Desfecho | null;
+  nota: number | null;
+  falha_critica: boolean;
+  observacao: string | null;
+  feedback_fortes: string | null;
+  feedback_melhorar: string | null;
 };
+
+// ---------------------------------------------------------------- script e avaliação
+export type Aplicabilidade = "sempre" | "venda" | "recusa";
+export type Desfecho = "venda" | "recusa" | "outro" | "sem_conversa";
+export type EstadoItem = "acertou" | "errou" | "divergencia" | "nao_se_aplica";
+export type TipoMarca = "acertou" | "errou" | "divergencia" | "nota";
+
+export type ScriptItem = { id: number; ordem: number; texto: string; orientacao: string | null; peso: number; critico: boolean };
+export type ScriptSecao = {
+  id: number;
+  ordem: number;
+  titulo: string;
+  aplicabilidade: Aplicabilidade;
+  aplicabilidade_label: string;
+  orientacao: string | null;
+  itens: ScriptItem[];
+};
+export type ScriptVersao = {
+  id: number;
+  nome: string;
+  numero: number;
+  status: "rascunho" | "ativa" | "arquivada";
+  valor_divergencia: number;
+  criado_em: string | null;
+  criado_por: string | null;
+  publicada_em: string | null;
+  avaliacoes: number;
+  secoes: ScriptSecao[];
+};
+export type ScriptVersaoResumo = Omit<ScriptVersao, "secoes" | "valor_divergencia">;
+export type ScriptIn = {
+  nome: string;
+  valor_divergencia: number;
+  secoes: { titulo: string; aplicabilidade: Aplicabilidade; orientacao?: string | null; itens: { texto: string; orientacao?: string | null; peso: number; critico: boolean }[] }[];
+};
+
+export type MarcaItem = { item_id: number; estado: EstadoItem | null; comentario: string | null };
+export type Marca = { id?: number; item_id: number | null; segundos: number; tipo: TipoMarca; texto: string | null };
+export type Calculo = {
+  nota: number | null;
+  falha_critica: boolean;
+  itens_criticos_errados: number[];
+  pendentes: number[];
+  sem_comentario: number[];
+  contagem: Record<EstadoItem, number>;
+};
+export type AvaliacaoCompleta = Avaliacao & {
+  call_id: number;
+  script: ScriptVersao | null;
+  itens: MarcaItem[];
+  marcas: Marca[];
+  eventos: { em: string; usuario: string | null; acao: string; detalhe: Record<string, unknown> | null }[];
+  calculo: Calculo | null;
+  trava: { nome: string | null; ate: string | null; ativa: boolean; minha: boolean };
+  desfechos: Record<Desfecho, string>;
+};
+export type RascunhoIn = Partial<{
+  desfecho: Desfecho | null;
+  categoria: string | null;
+  subcategoria: string | null;
+  pediu_nao_ligar: boolean;
+  observacao: string | null;
+  feedback_fortes: string | null;
+  feedback_melhorar: string | null;
+  itens: MarcaItem[];
+  marcas: Marca[];
+}>;
+export type FilaItem = {
+  id: number;
+  id_ligacao: number | null;
+  data_ligacao: string | null;
+  duracao_segundos: number | null;
+  operador_nome: string | null;
+  tabulacao_operador: string | null;
+  grupo: string | null;
+  status: StatusLigacao;
+  tem_audio: boolean;
+  rascunho: { monitora: string | null; trava: string | null; minha: boolean } | null;
+};
+export type Fila = { total: number; page: number; page_size: number; itens: FilaItem[]; meta: { diaria: number; feitas_hoje: number } };
 
 export type Call = {
   id: number;
@@ -297,7 +384,10 @@ async function verificar(r: Response) {
 async function parseError(r: Response) {
   try {
     const j = await r.json();
-    return typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j);
+    if (typeof j.detail === "string") return j.detail;
+    if (j.detail?.problemas) return [j.detail.mensagem, ...j.detail.problemas].filter(Boolean).join("\n");
+    if (Array.isArray(j.detail)) return j.detail.map((d: { msg?: string }) => d.msg ?? JSON.stringify(d)).join("\n");
+    return JSON.stringify(j.detail ?? j);
   } catch {
     return `${r.status} ${r.statusText}`;
   }
@@ -343,6 +433,23 @@ export const api = {
   gerarRelatorio: (enviar: boolean, data?: string) => post<Relatorio>("/api/v1/relatorios/gerar", { enviar, data }),
   enviarRelatorio: (id: number) => post<Relatorio>(`/api/v1/relatorios/${id}/enviar`),
   testarNotificacao: () => post<{ enviado: boolean; canais?: string[]; erros?: Record<string, string>; motivo?: string }>("/api/v1/notificacoes/teste"),
+  scriptAtivo: () => get<ScriptVersao>("/api/v1/scripts/ativo"),
+  scriptVersoes: () => get<ScriptVersaoResumo[]>("/api/v1/scripts/versoes"),
+  scriptVersao: (id: number) => get<ScriptVersao>(`/api/v1/scripts/versoes/${id}`),
+  novoRascunhoScript: () => post<ScriptVersao>("/api/v1/scripts/versoes"),
+  salvarScript: (id: number, s: ScriptIn) => enviarJson<ScriptVersao>(`/api/v1/scripts/versoes/${id}`, "PUT", s),
+  publicarScript: (id: number) => post<ScriptVersao>(`/api/v1/scripts/versoes/${id}/publicar`),
+  descartarScript: (id: number) => enviarJson<{ ok: boolean }>(`/api/v1/scripts/versoes/${id}`, "DELETE", {}),
+  parametros: () => get<Record<string, { descricao: string; valor: string }>>("/api/v1/parametros"),
+  salvarParametros: (p: Record<string, string>) => enviarJson<Record<string, { descricao: string; valor: string }>>("/api/v1/parametros", "PUT", p),
+  fila: (p: { operador?: string; page?: number }) => get<Fila>("/api/v1/avaliacoes/fila", p),
+  iniciarAvaliacao: (callId: number) => post<AvaliacaoCompleta>(`/api/v1/calls/${callId}/avaliacao`),
+  avaliacao: (id: number) => get<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}`),
+  salvarAvaliacao: (id: number, r: RascunhoIn) => enviarJson<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}`, "PUT", r),
+  finalizarAvaliacao: (id: number) => post<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}/finalizar`),
+  naoAvaliavel: (id: number, motivo: string) => enviarJson<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}/nao-avaliavel`, "POST", { motivo }),
+  reabrirAvaliacao: (id: number, motivo: string) => enviarJson<AvaliacaoCompleta>(`/api/v1/avaliacoes/${id}/reabrir`, "POST", { motivo }),
+  liberarAvaliacao: (id: number, forcar = false) => enviarJson<{ ok: boolean }>(`/api/v1/avaliacoes/${id}/trava?forcar=${forcar}`, "DELETE", {}),
   registrarResultado: (id: number, r: ResultadoIn) => enviarJson<Call>(`/api/v1/calls/${id}/resultado`, "POST", r),
   tabulacoes: () => get<TabulacoesResp>("/api/v1/tabulacoes"),
   salvarTabulacao: (id: number, regra: RegraTabulacao) =>
